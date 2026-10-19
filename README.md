@@ -15,10 +15,11 @@
 | [05 - STL 标准模板库](C%2B%2B/05-STL.md) | vector、string、deque、list、map、unordered_map、容器适配器、迭代器、算法、lambda、复杂度与迭代器失效 |
 | [06 - 现代 C++ 特性](C%2B%2B/06-%E7%8E%B0%E4%BB%A3C%2B%2B.md) | 移动语义、auto/decltype、lambda、constexpr、结构化绑定、optional/variant/string_view、Concepts、Ranges、C++20 特性 |
 | [07 - 编译、链接与程序运行机制](C%2B%2B/07-%E7%BC%96%E8%AF%91%E9%93%BE%E6%8E%A5%E4%B8%8E%E7%A8%8B%E5%BA%8F%E8%BF%90%E8%A1%8C%E6%9C%BA%E5%88%B6.md) | 编译四阶段、头文件、ODR、static/extern/inline、符号与链接、静态/动态库、ABI、程序内存布局、对齐与优化 |
+| [08 - 多线程与内存模型](C%2B%2B/08-%E5%A4%9A%E7%BA%BF%E7%A8%8B%E4%B8%8E%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B.md) | std::thread、mutex、条件变量、死锁、atomic、CAS、内存序、happens-before、future/async、线程池、jthread |
 
 ### 后续规划
 
-- **C++ 进阶：** 多线程与内存模型。
+- **C++ 后续专题：** 面试代码题、标准库实现分析、C++ 性能与并发专题深化。
 - **计算机图形学：** 数学基础、变换、光栅化、着色、光照、阴影、PBR、渲染管线。
 - **游戏引擎：** 引擎架构、资源管理、场景与实体系统、动画、物理、渲染、工具链与性能优化。
 
