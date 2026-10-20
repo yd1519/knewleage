@@ -6,7 +6,7 @@
 
 **前置知识：** [04-纹理与采样](04-纹理与采样.md)（sRGB 与数据纹理）、[05-光照模型与渲染方程](05-光照模型与渲染方程.md)（Radiance、Irradiance）、[06-PBR与IBL](06-PBR与IBL.md)（HDR Environment）、[08-抗锯齿技术](08-抗锯齿技术.md)（TAA、History 与 Pre-Exposure）。
 
-**下一篇预告：** 10-全局光照与光线追踪（待编写）。
+**下一篇预告：** [10-全局光照与光线追踪](10-全局光照与光线追踪.md)。
 
 **排版约定：** 简短变量/公式用行内代码；独立推导使用 GitHub 支持的块级公式；Markdown 表格中不使用需要额外宏包的数学表达式。示例使用 OpenGL 4.5 / GLSL 450 Core、C++17/GLM；除特别说明外，默认使用 Linear RGB 和浮点 HDR Render Targets。
 
@@ -2341,4 +2341,4 @@ Final Output Encoding
 
 **关联前一篇：** [08-抗锯齿技术](08-抗锯齿技术.md)。
 
-**关联下一篇：** 10-全局光照与光线追踪（待编写）—— GI、Light Transport、路径追踪、BVH、MIS、降噪、实时 RTGI 与渲染架构。
+**关联下一篇：** [10-全局光照与光线追踪](10-全局光照与光线追踪.md)—— GI、Light Transport、路径追踪、BVH、MIS、降噪、实时 RTGI 与渲染架构。
