@@ -38,12 +38,12 @@ PBR 是一组面向物理一致性的材质与光照设计原则。核心包括�
 
 对被动反射材质，固定一个入射方向：
 
-$$
+```math
 \int_{\Omega^+}
 f_r(\omega_i,\omega_o)
 (\mathbf N\cdot\omega_o)\,\mathrm d\omega_o
 \le1.
-$$
+```
 
 这是**半球积分约束**，不是要求每个方向的 BRDF 数值都不超过 1。若包括透射还应计算其它能量通道。
 
@@ -74,11 +74,11 @@ IBL 不是独立于 PBR 的材质模型，而是 BRDF 的一种照明输入来�
 
 在本篇 `L,V` 都从表面向外指的约定下，镜面反射的微面法线平分它们之间的夹角：
 
-$$
+```math
 \boxed{
 \mathbf H=\frac{\mathbf L+\mathbf V}{\|\mathbf L+\mathbf V\|}.
 }
-$$
+```
 
 当 `L≈-V` 时分母趋近零，工程实现需要提前排除退化方向，而不是无条件 Normalize。
 
@@ -86,18 +86,18 @@ $$
 
 Normal Distribution Function `D(H)` 描述单位宏观投影面积上具有某个微法线朝向的微面面积密度。常见归一化条件：
 
-$$
+```math
 \boxed{
 \int_{\Omega^+}D(\mathbf H)
 (\mathbf N\cdot\mathbf H)\,\mathrm d\omega_h=1.
 }
-$$
+```
 
 因此**按 NDF 采样微法线 H**时，常用立体角 PDF：
 
-$$
+```math
 p_H(\mathbf H)=D(\mathbf H)(\mathbf N\cdot\mathbf H).
-$$
+```
 
 面试易错：`D` 本身一般不是直接归一化的方向 PDF，不能漏掉 `NoH`。
 
@@ -115,7 +115,7 @@ $$
 
 ### 1. Cook–Torrance 镜面项怎么写？
 
-$$
+```math
 \boxed{
 f_{\mathrm{spec}}(\mathbf L,\mathbf V)=
 \frac{
@@ -126,7 +126,7 @@ G(\mathbf N,\mathbf V,\mathbf L)
 4(\mathbf N\cdot\mathbf V)(\mathbf N\cdot\mathbf L)
 }.
 }
-$$
+```
 
 定义在有效的上半球；数值实现需防止分母过小。
 
@@ -165,17 +165,17 @@ Fresnel 描述界面反射比例随入射角变化。常见介质在掠射角的
 
 对无吸收、非磁性且折射率可用实数表示的两个介质，在法线入射时：
 
-$$
+```math
 \boxed{
 F_0=\left(\frac{\eta_1-\eta_2}{\eta_1+\eta_2}\right)^2.
 }
-$$
+```
 
 空气到折射率约 1.5 的介质：
 
-$$
+```math
 F_0=\left(\frac{1-1.5}{1+1.5}\right)^2=0.04.
-$$
+```
 
 因此 0.04 是常见介质的工作流近似，不是所有非金属的严格常数。
 
@@ -183,11 +183,11 @@ $$
 
 令 `c=clamp(VdotH,0,1)`：
 
-$$
+```math
 \boxed{
 F(c)=F_0+(1-F_0)(1-c)^5.
 }
-$$
+```
 
 `c=1` 时 `F=F0`；`c=0` 时 `F=1`。RGB 实现中 `F0` 可以是向量，逐通道计算。
 
@@ -215,14 +215,14 @@ GGX 有相对显著的 Long Tail，能表示离镜面反射中心较远的方向
 
 定义 `r=roughness`、`alpha=r²`：
 
-$$
+```math
 \boxed{
 D_{\mathrm{GGX}}(N,H)=
 \frac{\alpha^2}{
 \pi\big[(NoH)^2(\alpha^2-1)+1\big]^2
 }.
 }
-$$
+```
 
 对 `NoH>0` 使用，并对数值分母采取保护。
 
@@ -239,10 +239,10 @@ float D = a2 / (PI * denom * denom);
 
 ### 4. GGX 的归一化是什么？
 
-$$
+```math
 \int_{\Omega^+}
 D_{\mathrm{GGX}}(H)\,NoH\,\mathrm d\omega_h=1.
-$$
+```
 
 这也解释采样 Half Vector 的 PDF `pH=D*NoH`。
 
@@ -264,22 +264,22 @@ $$
 
 对 `NoX>0`、`alpha=r²`：
 
-$$
+```math
 \boxed{
 G_1(N,X)=
 \frac{2\,NoX}{
 NoX+\sqrt{\alpha^2+(1-\alpha^2)(NoX)^2}
 }.
 }
-$$
+```
 
 `NoX=0` 时按有效边界处理为 0，数值实现应避免除零。
 
 ### 2. 一个常见的可分离 Smith Geometry 是什么？
 
-$$
+```math
 G(N,V,L)=G_1(N,V)\,G_1(N,L).
-$$
+```
 
 这是常见的可分离 Smith 近似。还存在 Height-Correlated Smith 等相关版本，不能将所有 G 模型混称完全一致。
 
@@ -287,10 +287,10 @@ $$
 
 为了减少运算量，一种常见形式：
 
-$$
+```math
 G_{\mathrm{SchlickGGX}}(NoX)=
 \frac{NoX}{NoX(1-k)+k}.
-$$
+```
 
 经典直接光照近似使用 `k=(r+1)²/8`；常见 IBL 讨论会用 `k=alpha/2`（其中 `alpha=r²`）。这些 `k` 是不同使用背景的**近似选择**，不是同一个精确 G1 等式。
 
@@ -325,11 +325,11 @@ G 的定义基于材质内部微几何统计，Vshadow 则由场景中的其他�
 
 ### 3. F0 怎样由 Metallic 计算？
 
-$$
+```math
 \boxed{
 F_0=\mathrm{mix}(0.04,C_{\mathrm{base}},m).
 }
-$$
+```
 
 ~~~glsl
 vec3 F0 = mix(vec3(0.04), baseColor, metallic);
@@ -341,29 +341,29 @@ vec3 F0 = mix(vec3(0.04), baseColor, metallic);
 
 对于介质，入射光的一部分被 Fresnel 镜面反射，剩下的部分才可能进入介质形成漫反射。一个常见实时近似：
 
-$$
+```math
 k_D=(1-F)(1-m).
-$$
+```
 
 它不是完整多层/多次散射下的精确能量账本，但比 Diffuse 与 Specular 完全无约束相加更合理。
 
 ### 5. 合并的 Direct BRDF 怎么写？
 
-$$
+```math
 \boxed{
 f_r=
 (1-m)(1-F)\frac{C_{\mathrm{base}}}{\pi}
 +
 \frac{DFG}{4(NoV)(NoL)}.
 }
-$$
+```
 
 对点光源，示意贡献：
 
-$$
+```math
 L_o^{\mathrm{point}}=
 f_r\,\frac{I}{r^2}\,(NoL)\,V_{\mathrm{shadow}}.
-$$
+```
 
 `I` 是理想点光源 Radiant Intensity，`Vshadow` 是宏观阴影可见性。
 
@@ -483,24 +483,24 @@ Disney 提出的 Principled BRDF/BSDF 系列模型以艺术家容易理解的参
 
 一种经典 Disney Diffuse Approximation 使用：
 
-$$
+```math
 F_{D90}=0.5+2r\,(\mathbf L\cdot\mathbf H)^2.
-$$
+```
 
-$$
+```math
 F_D=
 \big[1+(F_{D90}-1)(1-NoL)^5\big]
 \big[1+(F_{D90}-1)(1-NoV)^5\big].
-$$
+```
 
 相应 Diffuse 为：
 
-$$
+```math
 \boxed{
 f_{\mathrm{DisneyDiffuse}}=
 \frac{C_{\mathrm{base}}}{\pi}\,F_D.
 }
-$$
+```
 
 它描述特定经验拟合的方向响应，**不是所有方向/粗糙度下严格能量守恒的唯一漫反射公式**。实际引擎会采用归一化、能量补偿和其它模型的不同组合。
 
@@ -530,13 +530,13 @@ Clear Coat 近似基底表面上方额外的一层透明镜面涂层，例如汽
 
 环境贴图提供来自各个方向的入射 Radiance：
 
-$$
+```math
 L_o^{\mathrm{IBL}}=
 \int_{\Omega^+}
 f_r(N,L,V)\,
 L_{\mathrm{env}}(L)\,
 NoL\,\mathrm d\omega_l.
-$$
+```
 
 其中 `Lenv(L)` 通过环境图在方向 `L` 上采样，材质 BRDF 负责根据入射方向和视角分配反射贡献。
 
@@ -579,32 +579,32 @@ Reflection Probe、Local Probe Parallax Correction、Bent Normal、AO、Screen-S
 
 根据 `f_d=albedo/π`：
 
-$$
+```math
 L_o^{\mathrm{diffuse}}(N)=
 \frac{C_{\mathrm{base}}}{\pi}
 \int_{\Omega^+}
 L_{\mathrm{env}}(L)(N\cdot L)
 \,\mathrm d\omega_l.
-$$
+```
 
 把仅与环境和法线方向有关的积分定义为 Irradiance：
 
-$$
+```math
 \boxed{
 E(N)=\int_{\Omega^+}
 L_{\mathrm{env}}(L)\,(N\cdot L)
 \,\mathrm d\omega_l.
 }
-$$
+```
 
 则：
 
-$$
+```math
 \boxed{
 L_o^{\mathrm{diffuse}}=
 \frac{C_{\mathrm{base}}}{\pi}\,E(N).
 }
-$$
+```
 
 如果材质包含 Metallic，则按工作流为漫反射再乘 `1-metallic` 及相应 Fresnel 能量分配因子。
 
@@ -618,22 +618,22 @@ Diffuse Cosine Convolution 是宽角度的低频积分，即使原环境纹理�
 
 对半球使用 `p(L)=NoL/π`：
 
-$$
+```math
 \widehat E(N)=
 \frac1M\sum_{k=1}^{M}
 \frac{L_{\mathrm{env}}(L_k)(NoL_k)}
 {NoL_k/\pi}.
-$$
+```
 
 因此：
 
-$$
+```math
 \boxed{
 \widehat E(N)=
 \frac{\pi}{M}
 \sum_{k=1}^{M}L_{\mathrm{env}}(L_k).
 }
-$$
+```
 
 样本必须真的是 Cosine-Weighted。若采用 Uniform Hemisphere，则 PDF 是 `1/(2π)`，权重不会直接化简为上式。
 
@@ -650,18 +650,18 @@ $$
 
 若 `Lenv(L)=L0` 为常量，则：
 
-$$
+```math
 E(N)=L_0\int_{\Omega^+}\cos\theta\,\mathrm d\omega
 =\pi L_0.
-$$
+```
 
 因此：
 
-$$
+```math
 L_o^{\mathrm{diffuse}}=
 \frac{albedo}{\pi}\,\pi L_0
 =\boxed{albedo\,L_0}.
-$$
+```
 
 这是非常适合验证 Irradiance Precompute 和 `1/π` 是否放对位置的单元测试。
 
@@ -686,13 +686,13 @@ vec3 SampleDiffuseIBL(
 
 ### 1. Specular IBL 原始积分是什么？
 
-$$
+```math
 L_o^{\mathrm{spec}}=
 \int_{\Omega^+}
 L_{\mathrm{env}}(L)\,
 \frac{D(H)F(V,H)G(N,V,L)}{4NoV NoL}
 \,NoL\,\mathrm d\omega_l.
-$$
+```
 
 化简可以看出它同时依赖：
 
@@ -707,14 +707,14 @@ $$
 
 常见实时引擎采用如下**近似的积分分离**：
 
-$$
+```math
 \boxed{
 L_o^{\mathrm{spec}}(N,V,r,F_0)
 \;\approx\;
 L_{\mathrm{prefilter}}(R,r)\,
 \Big[F_0 A(NoV,r)+B(NoV,r)\Big].
 }
-$$
+```
 
 其中：
 
@@ -767,11 +767,11 @@ GGX BRDF 的镜面贡献主要集中在满足反射条件的微法线方向。�
 
 使用 `u1,u2` 为独立均匀随机数，`alpha=r²`（`0<alpha≤1`）：
 
-$$
+```math
 \phi=2\pi u_1,
-$$
+```
 
-$$
+```math
 \boxed{
 \cos\theta_h=
 \sqrt{
@@ -780,16 +780,16 @@ $$
 }
 }.
 }
-$$
+```
 
 随后在局部 `+Z` 方向：
 
-$$
+```math
 H_{\mathrm{local}}=
 (\sin\theta_h\cos\phi,\,
 \sin\theta_h\sin\phi,\,
 \cos\theta_h).
-$$
+```
 
 用局部 TBN/ONB 将采样结果转换到世界空间 `H`。
 
@@ -805,11 +805,11 @@ vec3 L = reflect(-V, H);
 
 如果按 `D(H)NoH` 采样微法线：
 
-$$
+```math
 \boxed{
 p_H(H)=D(H)\,NoH.
 }
-$$
+```
 
 但 BRDF 积分是对**方向 L** 进行的，需要使用变量变换的 Jacobian。
 
@@ -817,21 +817,21 @@ $$
 
 对固定 `V`，镜面反射 `H→L` 的立体角变量变换：
 
-$$
+```math
 \mathrm d\omega_l
 =4(\mathbf V\cdot\mathbf H)\,\mathrm d\omega_h.
-$$
+```
 
 因此：
 
-$$
+```math
 \boxed{
 p_L(L)=
 \frac{p_H(H)}{4VoH}
 =
 \frac{D(H)\,NoH}{4VoH}.
 }
-$$
+```
 
 这里应保证 `VoH>0`。漏掉这一步，会把 Half Vector 的 PDF 错误当成 Light Direction 的 PDF，使 Monte Carlo 积分出现系统性错误。
 
@@ -903,21 +903,21 @@ vec3 prefiltered = textureLod(uPrefilterMap, R, lod).rgb;
 
 若输入 Cubemap Face 分辨率为 `resolution`，一种常见概念近似：
 
-$$
+```math
 \omega_{\mathrm{texel}}\approx
 \frac{4\pi}{6\,resolution^2}.
-$$
+```
 
 方向采样的平均立体角近似：
 
-$$
+```math
 \omega_{\mathrm{sample}}\approx
 \frac{1}{M\,p_L(L)}.
-$$
+```
 
 因此一种启发式输入采样 LOD：
 
-$$
+```math
 \boxed{
 LOD_{\mathrm{source}}\approx
 \frac12\log_2
@@ -926,7 +926,7 @@ LOD_{\mathrm{source}}\approx
 {\omega_{\mathrm{texel}}}
 \right).
 }
-$$
+```
 
 这里的公式是以纹理 Level 的二维面积变化来对应立体角比例；它是**重要性采样环境预滤波的常见近似**，不是对任意 Cubemap Texel 精确立体角的通用解析式。
 
@@ -950,17 +950,17 @@ HDR 环境可能有极亮而很窄的区域，低概率命中样本会带来高�
 
 Schlick 公式：
 
-$$
+```math
 F=F_0+(1-F_0)(1-VoH)^5.
-$$
+```
 
 定义 `Fc=(1-VoH)^5`，重排：
 
-$$
+```math
 \boxed{
 F=F_0(1-F_c)+F_c.
 }
-$$
+```
 
 对单次 GGX 镜面环境积分，使用这种分解可以将**F0 的线性系数**与**与 F0 无关的偏置项**分别积分。
 
@@ -968,35 +968,35 @@ $$
 
 使用上面**按 NDF 采样 H 并转换成 L**的 Monte Carlo 估计，镜面积分的每样本几何权重可以化简成：
 
-$$
+```math
 G_{\mathrm{vis}}=
 \frac{G(N,V,L)\,VoH}
 {NoH\,NoV}.
-$$
+```
 
 对满足 `NoL>0` 的采样：
 
-$$
+```math
 \boxed{
 A(NoV,r)=
 \mathbb E[(1-F_c)\,G_{\mathrm{vis}}],
 }
-$$
+```
 
-$$
+```math
 \boxed{
 B(NoV,r)=
 \mathbb E[F_c\,G_{\mathrm{vis}}].
 }
-$$
+```
 
 因此预积分项为：
 
-$$
+```math
 \boxed{
 F_0 A(NoV,r)+B(NoV,r).
 }
-$$
+```
 
 **使用前提：** 这里的期望对应特定的 GGX Half Vector 采样及 Geometry 模型。若采用 VNDF Sampling、不同 G、Multi-Scattering 模型或另一套近似定义，LUT 的生成公式应相应改变。
 
@@ -1076,12 +1076,12 @@ LUT 只依赖 `NoV`、Roughness 和所采用的几何/采样模型。用不同�
 
 对整数 `i=0..N-1`：
 
-$$
+```math
 \boxed{
 \mathbf X_i=
 \left(\frac{i}{N},\ \phi_2(i)\right).
 }
-$$
+```
 
 `φ2` 为以 2 为底的 Radical Inverse，等价于把二进制位反转后映射到 `[0,1)`。
 
@@ -1131,13 +1131,13 @@ IBL 常把 Equirectangular HDR 转为 Cubemap，再生成 Diffuse Irradiance、S
 
 设方向单位向量 `d=(x,y,z)`，一种常见经纬映射约定：
 
-$$
+```math
 u=\frac{\mathrm{atan2}(z,x)}{2\pi}+\frac12,
-$$
+```
 
-$$
+```math
 v=\frac{\arcsin(y)}{\pi}+\frac12.
-$$
+```
 
 这只是**一种方向映射约定**。如果图像 V 方向向下，或 Cube Capture 朝向不同，还可能需要翻转/旋转；要通过测试标志点而不是凭感觉调整。
 
@@ -1708,11 +1708,11 @@ Face 朝向、Seamless Cubemap Sampling、跨面预过滤、Mip 生成或采样�
 
 从空气 `η1=1` 到介质 `η2=1.5`：
 
-$$
+```math
 F_0=
 \left(\frac{1-1.5}{1+1.5}\right)^2
 =0.04.
-$$
+```
 
 检查 Schlick Fresnel 在 `VoH=1` 时为 `0.04`，在 `VoH=0` 时为 `1`。
 
@@ -1725,12 +1725,12 @@ $$
 
 `NoH=1` 时 NDF：
 
-$$
+```math
 D_{\mathrm{GGX}}(1)=
 \frac1{\pi\alpha^2}
 =\frac1{\pi(0.0625)}
 \approx5.09296.
-$$
+```
 
 要验证自己的 Shader 是否把 `r²` 和 `alpha²` 混淆。
 
@@ -1738,10 +1738,10 @@ $$
 
 在局部 `N=(0,0,1)`，用均匀半球采样或确定性积分近似：
 
-$$
+```math
 \int_{\Omega^+}
 D(H)\,NoH\,\mathrm d\omega_h.
-$$
+```
 
 对 `r=0.2、0.5、0.8` 进行验证，正确极限应接近 1。Roughness 很小时 NDF 很尖锐，需要更密集采样。
 
@@ -1757,11 +1757,11 @@ $$
 
 给定 `baseColor=(0.6,0.5,0.2)`，整个入射半球 Radiance `Lenv=(2,2,2)`，对 `kD=1` 的理想 Lambert：
 
-$$
+```math
 E(N)=\pi L_{\mathrm{env}},
 \qquad
 L_o=C_{\mathrm{base}}L_{\mathrm{env}}.
-$$
+```
 
 参考结果：`Lo=(1.2,1.0,0.4)`。若结果多了或少了 `π`，说明预计算/Shader 的 Irradiance 约定不一致。
 
