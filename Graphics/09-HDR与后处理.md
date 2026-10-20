@@ -1904,3 +1904,441 @@ HDR Texture Viewer 通常自身具有显示范围、缩放或亮度映射控制�
 
 应查看具体像素的**原始数值**及格式、显示范围与所有后续变换，而不是只根据预览是否灰白判断算法错误。
 
+
+---
+
+## 二十四、秋招高频面试题与连续追问
+
+### Q1：什么是 HDR Rendering？
+在 Lighting/部分 Postprocess 中保留高动态范围 Scene Color，避免过早 Clamp/Quantize，并通过曝光和显示映射输出到目标设备。
+
+### Q2：为什么 Scene Linear RGB 大于 1 不代表 BRDF 违反能量守恒？
+BRDF 能量守恒限制入射能量被表面反射的比例；强烈入射照明仍能产生很大的出射 Radiance/HDR RGB。
+
+### Q3：HDR Rendering 与 HDR10 Output 有什么区别？
+前者是内部高动态范围计算与资源；后者还涉及目标显示峰值亮度、PQ、色域、输出接口/Swapchain 和相关元数据。
+
+### Q4：为什么光照计算必须在 Linear RGB 中？
+能量叠加与 BRDF/曝光比例要求线性运算；sRGB 编码数值含非线性 Transfer，不能直接解释为线性能量。
+
+### Q5：sRGB Encoding 能否简单等于 Gamma 1/2.2？
+只能作为某些场景的近似。标准 sRGB 是包含暗部线性段的分段曲线，严格编解码阈值和幂指数都不同。
+
+### Q6：OpenGL sRGB Texture 与 GL_FRAMEBUFFER_SRGB 各负责什么？
+前者通常在纹理采样时将 sRGB Color Channel Decode 到 Linear；后者在适当的 sRGB Framebuffer 写入时处理 Output Encoding。二者发生于不同阶段。
+
+### Q7：为什么 BaseColor Texture 通常设置 sRGB，而 Roughness 不设置？
+前者存编码颜色，后者存有确定数值意义的数据；对 Roughness 做 sRGB Decode 会扭曲材质参数。
+
+### Q8：什么是 Luminance？常见 Rec.709 系数是多少？
+相对亮度可由线性 Rec.709/sRGB RGB 近似为 `Y=0.2126R+0.7152G+0.0722B`。对其它 Primaries 需要对应转换。
+
+### Q9：为什么不能直接对 sRGB 编码通道使用 Rec.709 亮度权重？
+这组系数假设输入是 Linear RGB；编码颜色具有非线性响应，会造成测光比例错误。
+
+### Q10：为什么 Auto Exposure 常在 Log2 Luminance 空间做统计？
+场景亮度可能跨多个数量级，Log2 将亮度倍数转换为加法 Stops，便于大范围 Histogram/Metering。
+
+### Q11：几何平均亮度和算术平均亮度有何区别？
+几何平均 `Ygeo=2^(mean(log2(Y)))`，对乘法变化更自然；算术平均是 `sum(Y)/N`，极亮少数点可能产生不同的影响。
+
+### Q12：为什么 Histogram 不能直接计算 log2(0)？
+零的对数无定义，会造成负无穷或数值异常；应选择 Black Bin、Epsilon Clamp 或明确排除策略。
+
+### Q13：什么是 Exposure Compensation 的一挡？
+本篇正曝光补偿 `+1` 令最终曝光乘数 `E` 乘 2；但 EV100 的数值增大通常意味着相机进光减少，应区分符号。
+
+### Q14：EV100 的曝光公式？
+`EV100=log2((N²/t)*(100/ISO))`，其中 N 为光圈 f-number、t 为快门秒数，描述摄影参数关系。
+
+### Q15：为什么没有标定时不应把 EV100 直接当成曝光乘数？
+EV100 到数字 HDR 输出还需要摄影/引擎曝光校准约定、物理亮度标定与 Tone Mapping，不能直接用 2^EV100 当作所有引擎通用乘法。
+
+### Q16：Middle Gray 为什么经常取 0.18？
+18% Gray 是常见摄影/曝光参考约定，便于解释目标亮度定位；实际中灰显示值还受 Tone Curve、标定与输出变换影响。
+
+### Q17：什么是 Basic Auto Exposure？
+根据当前画面或指定区域的（加权）平均/Log Mean Luminance 计算目标曝光，再经时间适应得到实际曝光。
+
+### Q18：Histogram Auto Exposure 相比全图平均有什么优势？
+可按亮度分布分位数剔除/减小极亮或极暗尾部影响，也便于支持 Metering Mask 与更稳定的摄影控制。
+
+### Q19：Metering Mask 怎样影响自动曝光？
+它给屏幕不同位置的测光样本赋予权重，需在 Histogram/统计的累加阶段真正生效，而非事后任意修改曝光结果。
+
+### Q20：为什么 HDR Histogram 通常按 Log Luminance 分桶？
+Log2 档位与曝光 Stops 对应，可在有限 Bucket 中覆盖跨数量级的亮度范围。
+
+### Q21：GPU Histogram 为什么可能遇到 Atomic 争用？
+大量像素集中在有限几个亮度桶里，直接对 Global Bins 原子加会冲突；可先用 Workgroup Shared Histogram 汇总。
+
+### Q22：Compute Shader 中为什么所有线程都要执行 Barrier？
+在同一 Workgroup 的 Shared Memory 同步点，若仅部分 Invocation 提前 Return，剩余线程可能发生同步错误；越界线程也应到达 Barrier。
+
+### Q23：Percentile Clipping 与 RGB Clamp 有什么区别？
+前者按 Histogram 排序/累计质量排除亮度分布尾部，再对剩余亮度求统计值；后者直接限制颜色通道值，不是同一操作。
+
+### Q24：Exposure Adaptation 为什么需要 Delta Time？
+如果每帧使用相同固定插值因子，30 FPS 和 120 FPS 的每秒响应不同。指数平滑 `1-exp(-speed*dt)` 更接近按时间控制。
+
+### Q25：为什么可以在 Log Exposure/EV 空间做平滑？
+曝光本质按倍数/Stops 改变，Log2 平滑让相同 Stop 跨度具有更一致的时间响应，而非受当前线性乘数大小直接影响。
+
+### Q26：为什么 Brighten/Darken Speed 名称容易混淆？
+可能指场景亮度增加，或指曝光乘数增加，两者方向相反；应明确比较 `E_target` 和 `E_current` 的变化方向。
+
+### Q27：什么是 Pre-Exposure？
+在部分实时引擎中，Lighting/HDR Buffer 提前使用已知曝光相关尺度储存颜色，使浮点范围与时域过滤更合适；不自动等于最终曝光值。
+
+### Q28：TAA History 为什么要补偿 Pre-Exposure Ratio？
+若上帧和当前帧 History 的存储比例不同，必须转换到同一尺度后混合，否则会因曝光变化产生颜色残影或闪烁。
+
+### Q29：若 SceneBuffer=P*SceneLinear，最终要应用曝光 E，该怎样处理？
+Tone Mapping 前应乘 `E/P`，在已经应用过 Pre-Exposure 的 HDR Buffer 上不能再把 E 原样乘一遍。
+
+### Q30：Tone Mapping 与 sRGB Gamma/Encoding 的区别？
+Tone Mapping 压缩/重分配 HDR 动态范围；Output Transfer Encoding 把显示域颜色变为目标传输编码，二者不是一个概念。
+
+### Q31：Reinhard Tone Mapping 公式是什么？
+`T(x)=x/(1+x)`，对非负输入会平滑映射到 [0,1)；简单、易于测试，但可能降低高光对比或使画面偏灰。
+
+### Q32：White-Point Reinhard 是否对任意大输入自动限制到 1？
+不一定。常见扩展式 `x*(1+x/W²)/(1+x)` 在 `x=W` 输出 1，但 `x>W` 可能输出大于 1。
+
+### Q33：ACES 与常见 ACES Fitted Shader 是否相同？
+不是。ACES 是完整色彩管理体系；一些游戏 Shader 只使用受 ACES 启发的标量/逐通道 Tone Curve，不包括完整 RRT/ODT 与色域处理。
+
+### Q34：为什么逐通道 Tone Mapping 可能改变 Hue？
+R/G/B 经非线性压缩的相对比例不再恒定，强饱和高光容易发生色彩偏移，需要考虑 Luminance-Preserving/Gamut 方案。
+
+### Q35：Bloom 和 GI 有什么区别？
+Bloom 是 HDR 高亮在图像/镜头空间的扩散；GI 是光在场景几何间传播与反射，两者物理意义和实现层次不同。
+
+### Q36：为什么 Bloom Bright-Pass 常需要 Soft Knee？
+硬阈值在亮度临界点会突然开/关，易在运动和曝光变化时出现闪烁；Soft Knee 让响应平滑。
+
+### Q37：为什么 Bloom 常用 Downsample/Upsample Pyramid？
+大范围柔和光晕可在低分辨率下更高效生成，组合不同 Mip 的模糊尺度，也可减轻全分辨率大核滤波成本。
+
+### Q38：Bloom 应该在 Tone Mapping 之前还是之后？
+常见 HDR Pipeline 在 Tone Mapping 前合成，以保留亮光差异；其它布局存在，但需明确阈值、曝光尺度与颜色空间一致性。
+
+### Q39：Color Grading 与 PBR 有什么不同？
+PBR 描述场景照明和材质反射；Grading 改变最终成像的色彩风格。Grading 不能修复错误的物理光照。
+
+### Q40：3D LUT 为什么要明确 Input Color Space/Domain？
+LUT 以 RGB 值作坐标；若它为 SDR sRGB 编码颜色设计，却用于 HDR Linear RGB，将产生错误查找、Clamp 和色彩变化。
+
+### Q41：为什么 3D LUT 要用 Trilinear/Tetrahedral Interpolation？
+LUT 网格离散，实际 RGB 往往位于节点之间，需要插值估计连续的颜色变换。
+
+### Q42：为什么普通 sRGB 输出不能直接当 HDR10？
+HDR10 需要相应的 PQ、色域、亮度映射及 HDR 显示通路；普通 sRGB Encode 仅处理 SDR 颜色编码。
+
+### Q43：PQ 与 HLG 是一回事吗？
+不是。PQ 按绝对亮度范围设计；HLG 是另一类 HDR 传输设计，其相对亮度/显示系统理念不同。
+
+### Q44：HDR UI 为什么需要 Paper White 或参考白色？
+UI 数值应映射到可读、稳定的显示亮度尺度，不能把 SDR UI 的白色数值直接当成 HDR 场景中的统一物理白光。
+
+### Q45：Film Grain 与 Dithering 的区别？
+Grain 是风格化噪声；Dither 用受控噪声缓解量化 Banding，可有重叠实现但目标不同。
+
+### Q46：为什么 TAA、Bloom、Exposure 的顺序重要？
+TAA 重用历史并要求曝光尺度一致；Bloom 依赖高亮范围；Exposure Metering 的输入阶段决定统计分布。不同顺序数值和画质不等价。
+
+### Q47：为什么一个 RGBA16F HDR Scene Texture 不等于全部 Postprocess 都正确？
+仍需正确 Color Space、Histogram、曝光标定、TAA History、Tone/Gamut Map、Output Transfer、Swapchain Format 与 Shader Resource State。
+
+### Q48：后处理性能主要受哪几类因素影响？
+全屏 Read/Write Bandwidth、采样次数、Bloom Pyramid、Histogram Atomic Contention、3D LUT、临时资源和 Pass Synchronization；瓶颈须 GPU Profiling 判定。
+
+### Q49：为什么不能每帧 glReadPixels 一整张 HDR 图做曝光？
+同步 GPU Readback 会传大量数据、导致 GPU/CPU 等待。GPU Histogram/Reduction 通常更适合实时测光，CPU 需要时用异步小量 Readback。
+
+### Q50：在 OpenGLRenderer 中如何排查“高光亮度随曝光突然跳动”？
+先检查 Scene Linear HDR、Histogram、Exposure Adaptation、Pre-Exposure Ratio、Bloom Threshold、Tone Mapping，逐阶段固定/可视化数值，识别是场景光照、测光反馈还是时间域数值尺度错误。
+
+---
+
+## 二十五、动手验证题与参考答案
+
+### 练习 1：sRGB 编解码数值题
+
+给定一个线性通道 `L=0.18`，根据 sRGB 标准 Piecewise Curve 计算 `S(L)`。
+
+由于 `0.18>0.0031308`：
+
+$$
+S(0.18)=1.055(0.18)^{1/2.4}-0.055
+\approx0.46136.
+$$
+
+这说明 Linear Middle Gray 0.18 **不是** sRGB 编码值 0.18。用 CPU 和 GLSL 同时验证。
+
+### 练习 2：计算线性 Rec.709 Luminance
+
+`C=(2.0,1.0,0.5)`，假设线性 Rec.709 原色空间：
+
+$$
+Y=0.2126\cdot2.0+
+0.7152\cdot1.0+
+0.0722\cdot0.5.
+$$
+
+参考结果：
+
+$$
+\boxed{Y=1.1765.}
+$$
+
+其结果大于 1 并不违反什么限制，因为 Scene RGB 本来就是 HDR。
+
+### 练习 3：算术平均和几何平均的差别
+
+两个正亮度 `Y_1=1`、`Y_2=16`：
+
+- 算术平均：`(1+16)/2=8.5`。
+- 几何平均：
+
+$$
+Y_{\mathrm{geo}}=\sqrt{1\cdot16}=4.
+$$
+
+使用 `log2` 均值再反变换，检查结果也应为 4。
+
+### 练习 4：曝光补偿 Stops
+
+原始曝光乘数 `E=0.5`：
+
+- `EC=+1`：`E'=1.0`。
+- `EC=-1`：`E'=0.25`。
+- `EC=+2`：`E'=2.0`。
+
+解释为什么 “EV100 +1” 不能不加说明就用同一个加亮符号规则。
+
+### 练习 5：Basic Exposure 的目标值
+
+Metered Luminance 为 `Y=0.36`，Reference Key 为 `K=0.18`：
+
+$$
+E_{\mathrm{target}}=
+\frac{0.18}{0.36}=0.5.
+$$
+
+若测光亮度减半变成 `0.18`，新目标曝光回到 `1.0`。
+
+### 练习 6：Reinhard Tone Mapping 的两个输入
+
+$$
+T(1)=\frac{1}{2}=0.5,
+\qquad
+T(4)=\frac45=0.8.
+$$
+
+解释为何线性曝光倍增和 Tone-Mapped Output 不呈线性倍增。
+
+### 练习 7：时间适应的指数平滑
+
+已知 `E_current=1`、`E_target=4`、`s=2/s`、`dt=0.5s`，在线性 Exposure 空间：
+
+$$
+a=1-e^{-1}\approx0.6321206.
+$$
+
+$$
+E_{\mathrm{new}}=1+a(4-1)\approx2.89636.
+$$
+
+再使用第九节的 C++ 代码在 Log2 Exposure Space 测试，比较两个算法的输出，说明它们不相等且都可以构成合理的时间适应方案。
+
+### 练习 8：Pre-Exposure 与 TAA History
+
+假设上一帧 `P_prev=2`，History Texture 颜色值为 `H_prevStored=(4,2,1)`；当前 `P_current=0.5`。
+
+先转换 History 到当前 Pre-Exposure：
+
+$$
+H_{\mathrm{currentScale}}=
+(4,2,1)\frac{0.5}{2}
+=\boxed{(1,0.5,0.25)}.
+$$
+
+如果不转换便将其与当前 Color 混合，数值将相差 4 倍。
+
+### 练习 9：对 256-Bin Histogram 验证分桶
+
+设 `logMin=-8`、`logMax=8`、`B=256`。
+
+对 `Y=1`：
+
+$$
+\ell=\log_2(1)=0,
+\quad
+b=\left\lfloor
+256\frac{0-(-8)}{8-(-8)}
+\right\rfloor
+=128.
+$$
+
+在 GLSL 与 CPU Reference 中检查 Bucket 128 是否得到该样本。若输入为 `Y=2`，结果应落入 Bucket 144。
+
+### 练习 10：Metering Mask 的加权几何平均
+
+两个样本 `Y_1=1`、`Y_2=16`，权重 `w_1=3`、`w_2=1`：
+
+$$
+\overline{\ell}=
+\frac{3\log_2(1)+\log_2(16)}{4}
+=\frac{4}{4}=1.
+$$
+
+$$
+Y_{\mathrm{weighted}}=2^1=2.
+$$
+
+它与等权几何平均 4 明显不同，说明 Metering Mask 需要进入统计过程。
+
+### 练习 11：Bloom Threshold 与 Exposure Space
+
+有一个 Scene Linear 亮度 `Y_scene=4`、Pre-Exposure `P=0.25`、Bloom Threshold `T_scene=2`。
+
+- Scene Space：`4>2`，应参与 Bloom。
+- Stored HDR：亮度为 `1`，若阈值也转换为 `T_stored=0.5`，仍应参与。
+- 如果在 Stored HDR 上错误使用 `T=2`，该高亮会被忽略。
+
+解释为什么 Bloom 与 Pre-Exposure 不一致会导致光晕突然出现/消失。
+
+### 练习 12：RGBA16F 显存计算
+
+一张 `1920×1080` 的单样本 RGBA16F 名义字节数：
+
+$$
+1920\cdot1080\cdot8=16\,588\,800\ \mathrm{bytes}.
+$$
+
+换算：
+
+$$
+\frac{16\,588\,800}{1024^2}\approx15.82\ \mathrm{MiB}.
+$$
+
+再计算同分辨率双 History Buffer 约 `31.64 MiB`，不包含压缩、额外 Mips 和分配开销。
+
+### 练习 13：HDR 渐变、Tone Mapping 和 Banding
+
+绘制 Linear HDR 梯度，例如从 `0` 到 `16`，分别：
+
+1. 直接 Clamp 到 `[0,1]`。
+2. 使用 Reinhard。
+3. 使用 ACES-Inspired Fit。
+4. 对每个输出分别执行正确 sRGB Encode。
+5. 在 8-bit SDR Output 上开启/关闭 Dither。
+
+检查高亮 Roll-Off、灰度分布、RGB Hue 变化与 Banding。
+
+### 练习 14：Bloom 工程验证
+
+用一个 `Emissive=10` 的灯带与 `Albedo≈1` 的白墙作为测试场景：
+
+- 在 Linear HDR 观察两者亮度差。
+- 对 Bloom Prefilter 分别使用 Hard Threshold 和 Soft Knee。
+- 调整 Exposure Compensation 和 Pre-Exposure。
+- 验证 Bloom Threshold 在同一尺度下对相同场景持续一致。
+- 关闭 Bloom 并保留 Tone Mapping，确认发光材质的照明并未变成 GI。
+
+### 练习 15：完整 OpenGL 后处理 Pass Profiling
+
+固定相机与室内外亮度场景，分别记录 GPU 时间和中间 Buffer：
+
+~~~text
+HDR Scene Color
+Histogram Build + Reduction
+Exposure Adaptation
+Bloom Downsample/Blur/Upsample
+TAA / TAAU + History
+Tone Mapping / Color Grading
+Final Output Encoding
+~~~
+
+测量每 Pass GPU Time、Framebuffer 格式与尺寸、采样次数和 RenderDoc 中的实际颜色值。尝试单独降低 Bloom Resolution、Histogram Source Resolution，分析画质与耗时变化。
+
+---
+
+## 二十六、公式与高频结论速记
+
+| 知识点 | 公式 / 结论 |
+|---|---|
+| HDR Scene Color | 线性场景颜色，允许大于 1，不能过早 Clamp |
+| Linear Rec.709 Luminance | `Y=0.2126R+0.7152G+0.0722B` |
+| Log Luminance | `ell=log2(max(Y,epsilon))` |
+| Geometric Mean | `Ygeo=2^(mean(log2(Y)))` |
+| Histogram Bin | `floor(B*(ell-minLog)/(maxLog-minLog))`，随后 Clamp |
+| Key-Based Target Exposure | `Etarget=K/max(Ymeter,epsilon)` |
+| Exposure Compensation | `Eadjusted=Ebase*2^EC` |
+| EV100 | `log2((N²/t)*100/ISO)` |
+| Exposure Color | `Cexposed=E*Cscene` |
+| Exponential Adaptation | `a=1-exp(-speed*dt)` |
+| Linear Exposure Update | `Enext=E+a*(Etarget-E)` |
+| Log Exposure Update | `enext=e+a*(eTarget-e)` |
+| Pre-Exposure Scene Storage | `Cstored=P*Cscene` |
+| TAA History Conversion | `HcurrentScale=HprevStored*(Pcur/Pprev)` |
+| Final Exposure after Pre-Exposure | `Cexposed=Cstored*(E/P)` |
+| Reinhard | `T(x)=x/(1+x)` |
+| ACES-Inspired Fit | `x*(2.51*x+0.03)/(x*(2.43*x+0.59)+0.14)` |
+| sRGB Encode dark segment | `S=12.92*L`，小于等于 0.0031308 |
+| sRGB Encode bright segment | `S=1.055*L^(1/2.4)-0.055` |
+| Bloom Bright Pass | `B(C)=weight(luminance)*C` |
+| Bloom Compose | `Ccombined=Cscene+strength*Bloom`（近似） |
+| 3D Grading LUT | `Cout=LUT3D(Cin)`，注意 Domain |
+| HDR10 | PQ / 宽色域 / HDR 显示系统，非单纯 FP16 |
+| PQ vs sRGB | PQ 是 HDR 绝对亮度传输；sRGB 面向 SDR |
+| RGBA16F | 名义 8 bytes / pixel（单样本） |
+| Postprocess Profiling | Timestamp、Bandwith、Texture Access、Atomic |
+| Histogram Workgroup | Shared Bins + Global Atomic Merge |
+| Metering Mask | 在统计/桶累加时施加实际空间权重 |
+| Tone Mapping != Output Encoding | 动态范围映射与目标传输编码不同 |
+
+---
+
+## 二十七、阅读完成后的自查清单
+
+- [ ] 能从动态范围和场景颜色语义解释 HDR，而不是只说 RGB 可以大于 1。
+- [ ] 能解释浮点 HDR Buffer 为什么不等于 HDR10 显示输出。
+- [ ] 能分清 Scene-Referred Linear、Display-Linear 与 sRGB Encoded。
+- [ ] 能正确配置 BaseColor sRGB Texture 与 Roughness/Metallic Data Texture。
+- [ ] 能写出标准 sRGB Piecewise Encode/Decode，说明 Gamma 2.2 只是近似。
+- [ ] 能区分 GL Texture sRGB Decode 与 Framebuffer sRGB Encode。
+- [ ] 能针对 Rec.709 Linear RGB 计算 Luminance，并说明色域前提。
+- [ ] 能推导 Geometric Mean 与 Mean Log2 Luminance 的关系。
+- [ ] 能解释 Auto Exposure、Middle Gray 和 Exposure Compensation 的意义。
+- [ ] 能区分加亮的 Exposure Compensation 与 EV100 数值的方向。
+- [ ] 能写出 EV100 与光圈、快门、ISO 的关系。
+- [ ] 能解释 Histogram 256-Bin Log Mapping 和黑色像素策略。
+- [ ] 能写出 GPU Histogram Shared Memory/Atomic 合并流程。
+- [ ] 能解释为何部分线程不能在 Workgroup Barrier 前提前 Return。
+- [ ] 能从 Histogram Reduction 计算 Percentile / Metered Luminance。
+- [ ] 能说明 Metering Mask 为什么必须进入加权统计阶段。
+- [ ] 能推导线性与 Log2 Exposure Space 的时间适应公式。
+- [ ] 能区分 Brighten/Darken Speed 对 Exposure 系数的影响。
+- [ ] 能解释 Pre-Exposure 的原因、含义与 GPU 浮点范围关联。
+- [ ] 能写出 TAA History 乘 `P_current/P_previous` 的条件和公式。
+- [ ] 能解释为什么 Histogram 要还原 Scene Linear Luminance。
+- [ ] 能推导 Reinhard Tone Mapping 并说明其限制。
+- [ ] 能区分 ACES-Inspired Fitted Curve 与完整 ACES 色彩体系。
+- [ ] 能解释 Tone Mapping 与 sRGB/PQ Output Encoding 不同。
+- [ ] 能解释 Bloom、Lens Flare 和 GI 的区别。
+- [ ] 能实现 Bloom Soft Knee、Downsample/Upsample Pyramid。
+- [ ] 能解释 Bloom Threshold 与 Exposure/Pre-Exposure 的单位约定。
+- [ ] 能解释 3D LUT 的 Domain、Interpolation 和适用阶段。
+- [ ] 能说明 White Balance、Saturation 与 Gamut Mapping 的职责。
+- [ ] 能解释 HDR10/PQ/HLG、HDR Swapchain 与 Paper White。
+- [ ] 能搭建 OpenGL HDR FBO 与一次合法的 SDR Output Encoding。
+- [ ] 能设计清晰的 Exposure/Bloom/TAA/ToneMap/ColorGrading Pass 依赖。
+- [ ] 能区分 Dithering 和 Film Grain，理解 Color Banding 根源。
+- [ ] 能用 GPU Timestamp/RenderDoc 分析后处理性能与颜色错误。
+- [ ] 能针对 OpenGLRenderer 项目说明 Auto Exposure、Metering Mask、Bloom 与 HDR 输出的实现/测试思路。
+
+**关联前一篇：** [08-抗锯齿技术](08-抗锯齿技术.md)。
+
+**关联下一篇：** 10-全局光照与光线追踪（待编写）—— GI、Light Transport、路径追踪、BVH、MIS、降噪、实时 RTGI 与渲染架构。
