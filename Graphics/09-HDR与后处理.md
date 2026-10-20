@@ -1001,3 +1001,383 @@ Tone Mapper 能把错误超亮的图像视觉上压回 [0,1]，但它不会修�
 
 应先保证 Lighting 的数学定义正确，再使用 Exposure/Tone Mapping 控制显示动态范围。
 
+
+---
+
+## 十三、Bloom：为什么亮光会出现光晕？
+
+### 1. Bloom 在模拟什么现象？
+
+Bloom 是一种屏幕空间高亮光晕效果，用来近似光学系统中点扩散函数（PSF）、镜头内部散射、传感器/显示感知等因素让强亮区域向周围扩散的观感。
+
+它**不是让物体真正照亮周围场景**，也不等于 Global Illumination。亮的 Emissive 面板可以产生 Bloom，但这不意味着附近墙壁会自动收到真实的反弹光。
+
+### 2. Bloom 的典型后处理流程？
+
+~~~text
+Linear HDR Scene Color
+           |
+           v
+Bright-Pass / Soft-Knee Prefilter
+           |
+           v
+Half / Quarter Resolution Downsample Chain
+           |
+           v
+Blur / Multi-Scale Filter
+           |
+           v
+Upsample and Accumulate
+           |
+           v
+Bloom + Scene HDR Composition
+           |
+           v
+Exposure / Tone Mapping / Output Encoding
+~~~
+
+这里表示一种常见的**场景线性 HDR 中合成 Bloom，之后进行 Tone Mapping** 的设计。若引擎采用 Pre-Exposure，要先明确 Bloom Threshold 用哪个曝光尺度；不同游戏也可能采取其它顺序。
+
+### 3. 为什么 Bloom 应使用线性 HDR 信号？
+
+在场景 HDR 中，白墙和强烈灯光可能都“看起来很亮”，但后者的线性数值强度可能远大于前者。Bloom 可以利用这种差异决定哪些区域形成更强光晕。
+
+若提前 Tone Map 到普通 SDR，极亮的多种光源可能都被压缩到接近同一显示数值，丢失光晕的亮度层次。
+
+### 4. 什么是 Bright Pass / Threshold？
+
+最简单的方法在亮度超过阈值 `T` 时保留高亮部分：
+
+$$
+\boxed{
+B(C)=
+\begin{cases}
+0,&Y(C)\le T,\\
+C,&Y(C)>T.
+\end{cases}
+}
+$$
+
+但是硬阈值在 `Y≈T` 附近不连续，镜头移动、TAA Jitter 或光源变化时可能导致 Bloom 闪烁。
+
+### 5. Soft Knee 为什么比硬 Threshold 更稳定？
+
+Soft Knee 在阈值附近设计一段平滑过渡，使 Bright Pass 响应连续。实现可以用 Smoothstep 或更合适的曲线，让接近阈值的像素逐渐贡献 Bloom，而不是突然全开/全关。
+
+例如教学用的 Soft Weight：
+
+$$
+w(Y)=
+\mathrm{smoothstep}(T-k,\ T+k,\ Y),
+\quad k>0,
+$$
+
+再令 `B(C)=w(Y(C))*C`。这是简单平滑权重，并非某个商业引擎 Bloom Prefilter 的唯一标准算法。
+
+### 6. 为什么 Bloom 常用多级 Downsample，而非直接大核 Blur？
+
+在高分辨率图上进行大范围 Blur 成本很高。Downsample Pyramid 将不同尺度的模糊效果分散到低分辨率纹理上：
+
+- 低 Mip 生成较局部的柔和光晕。
+- 高 Mip 贡献更大范围、低频的光晕。
+- Upsample 时把不同空间尺度组合。
+
+这种方式更适合模拟层次丰富的亮光扩散，还能显著减少大半径 Filter 在全分辨率上的成本。
+
+### 7. Bloom 是否必须进行独立 3×3 Gaussian Blur？
+
+不是。可使用 Tent/Bilinear、Separable Gaussian、Dual Kawase、FFT 或其它卷积/滤波方法。实际画质和成本取决于 Kernel Shape、Halo Size、Texture Fetch、Memory Bandwidth 和目标光学风格。
+
+### 8. Bloom 的 Energy Conservation 应怎样理解？
+
+Bloom 作为视觉镜头/显示效果，可能从数学上对 HDR Scene Color 增加额外颜色，看起来让亮度增强。它不一定是严格能量守恒的真实光学 PSF 模拟。
+
+若要模拟能量归一化的 PSF，需要考虑卷积核的能量分布、场景原图与散射部分的组合，而不应简单认定 `scene+bloom*intensity` 是精确的物理能量传输。
+
+### 9. Bloom 与 Lens Flare 有什么区别？
+
+Bloom 是高亮区域的相对局部/跨尺度扩散；Lens Flare 更多模拟强光在镜头内部反射、散射产生的条纹、光斑、鬼影形状，可能依赖光源位置与镜头参数。
+
+它们常一起出现，但不能互相等同。
+
+---
+
+## 十四、GLSL：Soft-Knee Bloom 与多尺度合成
+
+### 1. 用线性 Luminance 做 Bloom Prefilter
+
+以下输入约定：`uSceneHDR` 存 Linear Scene Color，未 Tone Map；Threshold 与 Soft Knee 处于**相同线性场景/曝光尺度**，并且 Pixel UV 不跨越有效 Render Rect。
+
+~~~glsl
+#version 450 core
+
+in vec2 vUV;
+layout(location = 0) out vec4 outBloom;
+
+uniform sampler2D uSceneHDR;
+uniform float uBloomThreshold;
+uniform float uBloomKneeWidth;
+
+vec3 BloomPrefilter(vec3 sceneRGB)
+{
+    vec3 C = max(sceneRGB, vec3(0.0));
+    float Y = dot(C, vec3(0.2126, 0.7152, 0.0722));
+
+    float knee = max(uBloomKneeWidth, 1e-5);
+    float weight = smoothstep(
+        uBloomThreshold - knee,
+        uBloomThreshold + knee, Y);
+
+    return C * weight;
+}
+
+void main()
+{
+    vec3 scene = texture(uSceneHDR, vUV).rgb;
+    outBloom = vec4(BloomPrefilter(scene), 1.0);
+}
+~~~
+
+该函数只演示平滑高亮选取；完整 Bloom 一般还要低通/下采样和上采样。对 HDR 高亮做子采样时应考虑 Fireflies 和极亮区域的稳定性。
+
+### 2. 为什么每一级 Bloom Downsample 要考虑正确的采样 Footprint？
+
+Downsample 若只随机读取一个像素，可能跳过极亮的子像素高光或让它在不同帧突然出现。合理的空间滤波和采样设计有助于降低高频 Bright-Pass Flicker。
+
+但过宽滤波会让小光源被抹得太淡；核形状和能量归一化需要符合艺术预期。
+
+### 3. Bloom Upsample 合成该怎样理解？
+
+若 `B_i` 是各层低分辨率 Bloom，经过 Upsample/Filter 回到同一空间和尺寸后可加权求和：
+
+$$
+\boxed{
+B_{\mathrm{full}}=
+\sum_i w_i\,\mathrm{Upsample}(B_i).
+}
+$$
+
+最终一种常见合成：
+
+$$
+\boxed{
+C_{\mathrm{combined}}=
+C_{\mathrm{scene}}+s_B B_{\mathrm{full}}.
+}
+$$
+
+其中 `s_B` 是艺术强度参数；`w_i` 和各 Mip 的过滤核会影响光晕半径与能量，需要避免所有 Mip 不加归一化地随意叠加导致强度依 Mip Count 改变。
+
+### 4. 一个简单的 Bloom HDR 合成 Shader
+
+~~~glsl
+#version 450 core
+
+in vec2 vUV;
+layout(location = 0) out vec4 outColor;
+
+uniform sampler2D uSceneHDR;
+uniform sampler2D uBloomBlurHDR;
+uniform float uBloomStrength;
+
+void main()
+{
+    vec3 C = texture(uSceneHDR, vUV).rgb;
+    vec3 B = texture(uBloomBlurHDR, vUV).rgb;
+
+    outColor = vec4(C + B * uBloomStrength, 1.0);
+}
+~~~
+
+输入 Bloom 必须已经与 Scene Color 使用相同的线性颜色空间和曝光尺度，且纹理采样坐标已按照分辨率/Viewport 转换正确设置。
+
+### 5. 为什么不能把 Bloom 在 SRGB8 Buffer 上反复叠加还声称线性能量正确？
+
+如果 Bloom 纹理已是 sRGB 编码，却按线性能量 `C+B` 直接相加，色彩计算通常不正确。应在适当 Linear Scene/Display-Linear 阶段组合，再在最终目标上做 Output Transfer Encoding。
+
+### 6. Bloom 是否应该影响曝光 Metering？
+
+取决于测光意图。若 Metering 希望代表场景中真实/输入照明，应通常在额外 Lens Bloom 前统计；否则已扩散的高光会改变更多像素的 Metering Weight，可能反馈到曝光系统。
+
+某些特定美术系统可以有意让后处理后的亮区参与测光，但须明确这是另一种设计，而不是没有差别。
+
+---
+
+## 十五、Color Grading：LUT 处理的究竟是什么颜色？
+
+### 1. Color Grading 是什么？
+
+Color Grading 用于统一画面风格和色彩观感，可包含：
+
+- White Balance（色温/色调）。
+- Contrast、Saturation、Gamma、Gain。
+- Shadows/Midtones/Highlights 调整。
+- Curves、Color Wheels、Selective Color。
+- Film Look、色彩风格与场景统一。
+
+它与物理光照分工不同：PBR 描述入射与反射；Color Grading 负责最终成像的视觉风格。
+
+### 2. Color Grading 一定在 Tone Mapping 之后吗？
+
+不一定。某些 Color Grading 操作在 Scene-Referred HDR 下执行，有些在 Display-Referred SDR 下执行；也可以把多个 Color Transform Baking 到一个 LUT 中。
+
+如果 LUT 是为 `[0,1]` 的 SDR Display-Referred RGB 制作，却拿它直接查询 `RGB>1` 的线性 HDR Scene Color，结果通常没有定义或被 Clip，造成高光和颜色损失。
+
+### 3. 3D Color LUT 的输入输出是什么？
+
+3D LUT 以三个颜色通道作为三维索引，将输入颜色映射到输出颜色：
+
+$$
+\boxed{
+C_{\mathrm{out}}=
+LUT_{3D}(C_{\mathrm{in}}).
+}
+$$
+
+`Cin` 所属色域、Transfer、数值区间必须和 LUT 的作者/生成软件使用的 Domain 一致。
+
+### 4. 3D LUT 为什么需要插值？
+
+LUT 是离散采样网格，例如 `32³` 或 `64³` 个控制点。运行时大多数输入颜色位于网格之间，需要 Trilinear 或 Tetrahedral Interpolation 来估计连续变换。
+
+LUT Resolution 越低，某些剧烈曲线/局部色彩调整可能出现 Banding；高分辨率则增加纹理储存和潜在采样成本。
+
+### 5. 为什么 3D LUT 可以被 Texture3D 采样？
+
+将 LUT 的 R/G/B 输入作为三维 UVW 坐标，使用 GPU 3D Texture 的 Linear Filtering，可获得 Trilinear 插值结果：
+
+~~~glsl
+uniform sampler3D uColorLUT;
+uniform float uLUTSize; // e.g. 32.0
+
+vec3 SampleLUT(vec3 color01)
+{
+    float size = uLUTSize;
+    vec3 uvw = clamp(color01, 0.0, 1.0);
+    uvw = (uvw * (size - 1.0) + 0.5) / size;
+    return texture(uColorLUT, uvw).rgb;
+}
+~~~
+
+这里的 UVW 半 Texel 转换适用于 LUT 以规则中心点离散存储的设计。**输入需要预先处于 LUT 定义的 [0,1] 域和色彩空间**；不能无条件把超范围 HDR 值 Clamp 后当成正确 HDR Grading。
+
+### 6. 为什么 LUT 的伽马约定非常重要？
+
+一个 LUT 若针对 sRGB 编码的 Display RGB 生成，在 Linear Scene RGB 上直接使用，颜色响应会完全不同。反过来，针对 Linear Display RGB 生成的 LUT 也不能拿去处理已经 sRGB 编码的值。
+
+Color LUT 必须有明确 Input/Output Color Space Metadata，不能只传一张无语义 `RGBA8` 3D Texture。
+
+### 7. 3D LUT 能代替所有 Color Grading 吗？
+
+3D LUT 可以近似大量静态三通道颜色变换，但不天然适合：
+
+- 强依赖场景局部空间位置的调整。
+- 需要无限/极宽 HDR 动态范围且无合适 Log Encoding 的变换。
+- 复杂时间自适应逻辑。
+- 特定感知色彩/色域约束下的动态数学运算。
+
+它是实用的预计算表达，不是所有颜色处理的完全替代。
+
+---
+
+## 十六、White Balance、对比度、饱和度与色域
+
+### 1. White Balance 是做什么的？
+
+White Balance 调整不同光源色温/色偏下中性色的呈现方式，通常依赖颜色空间转换、色适应（Chromatic Adaptation）或引擎的可控艺术近似。
+
+它不简单等于给 `R` 通道乘 1.2、`B` 乘 0.8：这种简化能做艺术调整，但不等同于物理/色度学意义完整的白平衡算法。
+
+### 2. Saturation 的一个线性 RGB 教学表达
+
+对于线性 `C`、亮度 `Y=dot(C,w)`，定义 `s`：
+
+$$
+\boxed{
+C_{\mathrm{sat}}=
+Y\mathbf 1+s(C-Y\mathbf1).
+}
+$$
+
+`s=0` 得到灰度；`s=1` 不变。该式是简单色彩插值，不是完全符合人眼感知或专业 Grading 系统的饱和度模型。
+
+### 3. Contrast 与 Gamma 是同一种数学操作吗？
+
+不是。Contrast 常围绕一个 Pivot 调整亮暗差异；Gamma/幂函数改变中间调响应。若用非线性 Power Curve 处理 HDR Linear Color，必须考虑输入非负和定义的参考亮度。
+
+将所有调整都叫 Gamma 会掩盖它们在中灰、黑点与高光上的区别。
+
+### 4. 什么是 Gamut Mapping？
+
+场景/工作色域可能表示一些目标显示器无法表达的颜色。Gamut Mapping 负责将这些 Out-of-Gamut Colors 转为目标 Gamut 内更合理的颜色。
+
+最简单的逐通道 Clamp 可能破坏色相/饱和度，现代显示管线往往需要更有感知依据的映射方法。
+
+### 5. 为什么广色域 RGB 不能继续盲用 Rec.709 Luminance 权重？
+
+不同 Primaries 到 XYZ 的矩阵不同，因此相对亮度 `Y` 的系数也不同。若当前工作空间为 ACEScg/AP1、Rec.2020 或其它线性广色域 RGB，则应使用该空间对应的 `RGB→XYZ Y` 转换或先转换到正确的测光空间。
+
+**RGB 的线性性**和**RGB 属于哪个色域**是两个正交属性，不能混淆。
+
+### 6. Color Grading 与 Display Calibration 有什么区别？
+
+Color Grading 决定内容的创作风格与颜色变换；Display Calibration/Color Management 决定最终输出设备能否按照预期的亮度、白点、传输曲线和色域显示。
+
+未经校准的显示器可能让画面风格看起来不同，但不意味着 Shader BRDF 错误；同样不能用 Color Grading 去代替正确的 Output Transfer Function。
+
+---
+
+## 十七、HDR Display：HDR Scene Buffer 与 HDR10 不是一回事
+
+### 1. 什么是 SDR 输出？
+
+普通 SDR 管线可使用特定的显示色域（常见 sRGB/Rec.709）、标准化的显示映射和相应 Transfer。为了让显示正确，需要明确是否输出 sRGB 编码数值及 Framebuffer 对其进行怎样的转换。
+
+不能简单说“屏幕只有 0 到 1，所以就是 SDR”：所有数字显示编码都有有限码值范围，HDR10 的编码同样可归一化到 `[0,1]`，但数值背后的亮度语义完全不同。
+
+### 2. 什么是 HDR10？
+
+HDR10 是面向高动态范围显示的一组常见系统约定，通常包括：
+
+- PQ (Perceptual Quantizer) 传输函数，ST 2084。
+- Rec.2020 容器色域/信号表述。
+- 10-bit 级别的编码支持与相应输出路径。
+- 有关主显示和亮度的静态元数据（如兼容平台所要求的信息）。
+
+这与“游戏内部使用 RGBA16F”不是同一个概念。HDR10 输出还需要系统、窗口、交换链/显示接口与硬件支持。
+
+### 3. PQ 和 sRGB 的主要区别？
+
+sRGB 编码面向 SDR 显示条件；PQ 是以**绝对显示亮度**为基础设计的非线性编码（ST 2084），在标准定义中覆盖到高绝对亮度范围。
+
+**不能把 sRGB OETF 用在 HDR10 输出值上**；同样不能把 PQ 编码的 Display Data 直接视为可以用于 PBR 求和的线性 Radiance。
+
+### 4. HLG（Hybrid Log-Gamma）是什么？
+
+HLG 是另一类 HDR 传输方案，强调不同显示系统与广播等使用条件下的兼容和相对亮度映射特性。它与 PQ 的绝对亮度标定逻辑不同。
+
+选择 PQ/HLG、SDR Backbuffer、平台 HDR Swapchain，取决于应用和显示生态，不由 Scene HDR Float Texture 格式自动决定。
+
+### 5. HDR Output 需要什么额外工程处理？
+
+至少要考虑：
+
+- 系统/显示器的 HDR 能力检测。
+- HDR Swapchain / Framebuffer Color Space。
+- Target Peak Brightness 和 Paper White / UI Reference White。
+- Tone/Output Mapping 到目标显示动态范围。
+- Work Gamut 到输出 Gamut 变换。
+- PQ/HLG/其他 Output Transfer Encoding。
+- 元数据、显示器色彩管理及平台 API 路径。
+- SDR 与 HDR 模式切换的历史资源、曝光、UI 合成差异。
+
+### 6. 为什么 HDR UI 不能简单用传统 SDR 白色直接叠加？
+
+HDR 场景中的亮度数值可能远大于 SDR UI 的 1.0 参考范围。如果没有明确 Paper White/Reference White 和 UI Composite Space，UI 可能过暗、过亮或在设备上不一致。
+
+很多引擎对 SDR UI Layer 做专门的 HDR Composite/Scaling，使文本在宽亮度范围场景中仍可读。
+
+### 7. “Linear HDR Render Target + ACES Fitted = HDR10 输出”这句话为什么错误？
+
+它至少漏掉了 HDR10 的显示色域、绝对亮度映射、PQ 输出编码、交换链/平台支持与可能的元数据。ACES 风格曲线只是可能参与其中的一部分 Tone Mapping。
+
