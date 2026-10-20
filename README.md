@@ -27,11 +27,12 @@
 | [04 - 纹理与采样](Graphics/04-%E7%BA%B9%E7%90%86%E4%B8%8E%E9%87%87%E6%A0%B7.md) | UV/采样过滤、Mipmap/LOD/各向异性、sRGB 与数据贴图、BC/ASTC、Texture Source/GPU 资源、GPU Readback 与 Texture Streaming |
 | [05 - 光照模型与渲染方程](Graphics/05-%E5%85%89%E7%85%A7%E6%A8%A1%E5%9E%8B%E4%B8%8E%E6%B8%B2%E6%9F%93%E6%96%B9%E7%A8%8B.md) | Radiometry、立体角、Radiance、Lambert/Phong/Blinn-Phong、BRDF/Rendering Equation、Monte Carlo、重要性采样、MIS 与 GLSL 实现 |
 | [06 - PBR 与 IBL](Graphics/06-PBR%E4%B8%8EIBL.md) | 微表面 Cook–Torrance、Fresnel、GGX、Smith、Metallic/Roughness、Disney BRDF、Diffuse/Specular IBL、Split-Sum、BRDF LUT、GLSL 与 RenderDoc |
+| [07 - 阴影技术](Graphics/07-%E9%98%B4%E5%BD%B1%E6%8A%80%E6%9C%AF.md) | Shadow Mapping、Depth/Slope/Normal Bias、PCF/PCSS、CSM、点光 Cubemap、VSM/EVSM、Virtual Shadow Maps、Contact/RT Shadow 与性能调试 |
 
 ### 后续规划
 
 - **C++ 后续专题：** 面试代码题、标准库实现分析、C++ 性能与并发专题深化。
-- **计算机图形学后续专题：** 阴影、抗锯齿、HDR/后处理、全局光照。
+- **计算机图形学后续专题：** 抗锯齿、HDR/后处理、全局光照。
 - **游戏引擎：** 引擎架构、资源管理、场景与实体系统、动画、物理、渲染、工具链与性能优化。
 
 ## 复习方式
