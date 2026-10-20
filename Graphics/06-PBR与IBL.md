@@ -1114,3 +1114,422 @@ vec2 Hammersley(uint i, uint N)
 
 同一确定性 Sequence、有限样本、亮环境热点、采样不足及预滤波核近似可能产生结构化误差。可增加样本、适当随机扰动/旋转采样序列或使用其它低差异采样策略。
 
+
+---
+
+## 十七、HDR Environment Map 与 Cubemap 预处理
+
+### 1. Equirectangular HDR 与 Cubemap 的区别？
+
+- Equirectangular：用经纬度展开的二维纹理存储方向 Radiance，便于从 HDRI 文件导入。
+- Cubemap：六个方向面组成的立方体投影，硬件支持使用三维方向向量直接采样。
+
+IBL 常把 Equirectangular HDR 转为 Cubemap，再生成 Diffuse Irradiance、Specular Prefilter。方向映射和 Cubemap Face 朝向需严格一致。
+
+### 2. Equirectangular UV 怎么从方向向量得到？
+
+设方向单位向量 `d=(x,y,z)`，一种常见经纬映射约定：
+
+$$
+u=\frac{\mathrm{atan2}(z,x)}{2\pi}+\frac12,
+$$
+
+$$
+v=\frac{\arcsin(y)}{\pi}+\frac12.
+$$
+
+这只是**一种方向映射约定**。如果图像 V 方向向下，或 Cube Capture 朝向不同，还可能需要翻转/旋转；要通过测试标志点而不是凭感觉调整。
+
+为避免不兼容的公式命令，上式的 `atan2` 表达式可以在实现中使用 GLSL 内建 `atan(y,x)`：
+
+~~~glsl
+vec2 DirectionToEquirectUV(vec3 dir)
+{
+    dir = normalize(dir);
+    const vec2 invAtan = vec2(
+        0.15915494309189535, // 1/(2*pi)
+        0.31830988618379067  // 1/pi
+    );
+    vec2 uv = vec2(atan(dir.z, dir.x), asin(dir.y));
+    return uv * invAtan + vec2(0.5);
+}
+~~~
+
+### 3. 为什么 HDR 环境纹理通常需要浮点格式？
+
+环境亮点、太阳光和室内光源可能超过 `1`，若使用普通 LDR 编码并提前 Clamp，环境 Specular 中的真实亮度差异会丢失。
+
+实际 GPU 可使用 `RGB16F`、`RGBA16F` 或其它支持足够动态范围的纹理格式；选择需考虑带宽、滤波支持与目标平台。
+
+### 4. 为什么 Cubemap 需要处理 Face Seam？
+
+Cubemap 的相邻面具有连续方向，但其二维 Face 坐标和采样边界不同。IBL 滤波可能访问跨 Face 的邻域，因此需要正确的 Seamless Cube Sampling、Face Orientation 和 Mipmap/Prefilter 边界处理。
+
+错误的 Face 朝向还会导致倒置/旋转的天空、反射纹理拼接不连续。
+
+### 5. Global Environment 与 Local Reflection Probe 的区别？
+
+Global Environment 假设相同方向的环境 Radiance 对全场景点都适用。Local Reflection Probe 则在场景不同区域使用不同的捕获和可能的 Parallax Correction，以近似反射位置变化。
+
+但 Probe 仍然无法完整表达所有实时动态遮挡及多跳镜面反射。
+
+---
+
+## 十八、Specular Prefilter Shader 核心循环
+
+### 1. 最小预滤波 Shader 需要哪些输入？
+
+- 原始 `uEnvironmentMap`：HDR Cubemap。
+- 输出 Cubemap 当前 Face 的每像素方向 `R`。
+- 当前输出 Mip 对应的 Roughness。
+- 输入 Cubemap Face 分辨率和预计算 Sample Count。
+- GGX 重要性采样函数、Hammersley Sequence、NDF 函数及正确 PDF。
+
+### 2. 预滤波主循环如何写？
+
+下方函数采用常见 Split-Sum Prefilter 近似：`N=V=R`。它使用输入环境图 `textureLod`，根据每个样本的 Solid Angle 估计输入 Mip，避免极亮小区域引发明显采样伪影。
+
+~~~glsl
+uniform samplerCube uEnvironmentMap;
+uniform float uEnvironmentFaceResolution;
+
+vec3 PrefilterEnvironment(vec3 R, float roughness, uint sampleCount)
+{
+    vec3 N = normalize(R);
+    vec3 V = N; // Split-Sum prefilter approximation: N = V = R
+    vec3 accumulated = vec3(0.0);
+    float totalWeight = 0.0;
+
+    float saTexel = 4.0 * PI /
+                    (6.0 * uEnvironmentFaceResolution *
+                           uEnvironmentFaceResolution);
+
+    for (uint i = 0u; i < sampleCount; ++i)
+    {
+        vec2 Xi = Hammersley(i, sampleCount);
+        vec3 H = ImportanceSampleGGX(Xi, N, roughness);
+        vec3 L = normalize(reflect(-V, H));
+
+        float NoL = max(dot(N, L), 0.0);
+        if (NoL <= 0.0) continue;
+
+        float NoH = max(dot(N, H), 0.0);
+        float VoH = max(dot(V, H), 0.0);
+        float D = DistributionGGX(NoH, roughness);
+
+        float pdf = max(D * NoH / max(4.0 * VoH, 1e-6),
+                        1e-6);
+        float saSample = 1.0 / (float(sampleCount) * pdf);
+
+        float sourceLod = (roughness <= 0.0)
+            ? 0.0
+            : 0.5 * log2(max(saSample / saTexel, 1e-6));
+
+        vec3 Li = textureLod(uEnvironmentMap, L,
+                             max(sourceLod, 0.0)).rgb;
+
+        accumulated += Li * NoL;
+        totalWeight += NoL;
+    }
+
+    return totalWeight > 0.0
+        ? accumulated / totalWeight
+        : vec3(0.0);
+}
+~~~
+
+**重要说明：** 这是经典的 GGX 方向采样预滤波近似，**不是完整的 Specular BRDF 积分**；它使用 `NoL` 作为样本权重并在最后归一化，几何项/Fresnel 的大部分视角变化留给 BRDF LUT。它不是对任意入射分布完全无偏、精确的 Split-Sum 分解。
+
+### 3. 为什么需要对 Roughness 0 做特殊处理？
+
+极光滑反射的理想极限应使用最尖锐的环境信息，通常对应原始环境 Level 0。实际实现中的 Roughness Clamp 和 Mip 映射可能使这个极限不是严格 Delta，需要按设计选择一致的处理。
+
+### 4. 预滤波的 Mip 层怎么组织？
+
+例如对 `mipCount=5` 的输出：
+
+~~~text
+Mip 0 : roughness = 0.00  -> sharp reflection
+Mip 1 : roughness = 0.25
+Mip 2 : roughness = 0.50
+Mip 3 : roughness = 0.75
+Mip 4 : roughness = 1.00  -> broad reflection
+~~~
+
+这种线性映射 `roughness=mip/(mipCount-1)` 是一种常见资源组织约定；如果预计算使用其它映射，Runtime 应同步反映该约定。
+
+### 5. 为什么增加 Prefilter Resolution 不一定提升画质？
+
+关键取决于原始环境图、每个 Roughness 的角度积分范围、采样数、HDR 动态范围、Cubemap Seam 及源 Mip 选择。
+
+如果 Sample Count 太低，单纯提高输出 Cubemap 分辨率可能只得到更清晰的噪点，而非更稳定的反射。
+
+---
+
+## 十九、BRDF LUT 与 Runtime IBL 的完整组合
+
+### 1. 怎样给 BRDF LUT 提供一致的 Smith GGX？
+
+第八节的 `GeometrySmith` 使用直接光 Schlick–GGX 近似。如果想在 LUT 中采用更接近经典 GGX Smith 的形式，可用以下 `G1` 组合（要与实际使用的 LUT 生成器一致）：
+
+~~~glsl
+float GeometryGGXExactG1(float NdotX, float roughness)
+{
+    if (NdotX <= 0.0) return 0.0;
+
+    float alpha = max(roughness * roughness, 1e-4);
+    float alpha2 = alpha * alpha;
+
+    float root = sqrt(alpha2 +
+                      (1.0 - alpha2) * NdotX * NdotX);
+    return 2.0 * NdotX / max(NdotX + root, 1e-7);
+}
+
+float GeometrySmithForLUT(
+    float NdotV, float NdotL, float roughness)
+{
+    return GeometryGGXExactG1(NdotV, roughness) *
+           GeometryGGXExactG1(NdotL, roughness);
+}
+~~~
+
+这是一种具体 LUT 模型，不是对所有引擎强制的标准。要复现某个引擎的外观，应和其 BRDF LUT/Prefilter 生成约定保持一致。
+
+### 2. 一个与前述约定匹配的 Runtime IBL 函数
+
+**前提：** Irradiance Cubemap 存 `E(N)`（不包含 `1/π`）；Prefilter Cubemap 存经典 Roughness-Dependent 环境预滤波结果；BRDF LUT 的 R/G 分别是 `A`、`B`，坐标为 `(NoV,roughness)`。
+
+~~~glsl
+uniform samplerCube uIrradianceMap;
+uniform samplerCube uPrefilterMap;
+uniform sampler2D   uBRDFLUT;
+uniform float uMaxPrefilterMip;
+
+vec3 EvaluateIBL(
+    vec3 N, vec3 V,
+    vec3 baseColor, float metallic, float roughness)
+{
+    N = normalize(N);
+    V = normalize(V);
+
+    float NoV = max(dot(N, V), 0.0);
+    if (NoV <= 0.0) return vec3(0.0);
+
+    vec3 F0 = mix(vec3(0.04), baseColor, metallic);
+
+    // A common roughness-aware Fresnel approximation for IBL.
+    vec3 Frough = F0 +
+        (max(vec3(1.0 - roughness), F0) - F0) *
+        pow(1.0 - NoV, 5.0);
+
+    vec3 kD = (vec3(1.0) - Frough) * (1.0 - metallic);
+
+    // Irradiance Cubemap stores E(N), so Lambert divides by PI.
+    vec3 irradiance = texture(uIrradianceMap, N).rgb;
+    vec3 diffuse = kD * baseColor * irradiance / PI;
+
+    vec3 R = reflect(-V, N);
+    vec3 prefiltered = textureLod(
+        uPrefilterMap, R,
+        roughness * uMaxPrefilterMip
+    ).rgb;
+
+    vec2 envBRDF = texture(uBRDFLUT,
+                           vec2(NoV, roughness)).rg;
+
+    // Classic split-sum specular approximation.
+    vec3 specular = prefiltered *
+                    (F0 * envBRDF.x + envBRDF.y);
+
+    return diffuse + specular;
+}
+~~~
+
+### 3. 为什么 IBL 的 Diffuse 使用 Frough，而 Direct 使用 F(VdotH)？
+
+上面的 `Frough` 是**一种在常见实时 IBL 工作流中使用的方向/粗糙度启发式能量分配近似**，它不等于对所有入射环境方向积分 Fresnel 所得的严格值。
+
+Direct Light 明确知道某个 `L`，可以使用对应 Half Vector `H` 的 Fresnel。IBL Diffuse 只查询预卷积后的环境统计信息，通常无法以单一 `VdotH` 精确替代整个入射半球的 Fresnel。
+
+### 4. 为什么只有 IBL Specular 的 BRDF LUT 不需要 Base Color 作为坐标？
+
+Schlick Fresnel 可以拆成 `F0 * (1-Fc)+Fc`，使 F0 以线性系数的方式进入结果，所以 LUT 仅存 `NoV` 与 Roughness 的系数 A/B。
+
+但是如果用复杂的光谱 Fresnel、多次散射或不同的 BSDF，LUT 可能需要更多参数维度或其它近似。
+
+### 5. Direct + IBL 如何组合？
+
+在主 Fragment Shader 中：
+
+~~~glsl
+vec3 Lo = vec3(0.0);
+
+// Example: each light uses the same direct BRDF conventions.
+// Lo += EvaluateCookTorrance(...) for each visible light.
+
+vec3 ambientIBL = EvaluateIBL(
+    N, V, baseColor, metallic, roughness);
+
+vec3 hdrColor = Lo + ambientIBL + emissive;
+
+// Exposure, tone mapping, and output encoding happen later.
+~~~
+
+**注意：** 多个光源直接相加的结果仍在线性 HDR 空间。对实时 GI/AO/Probe 的额外修正，必须明确是作用于 Diffuse、Specular 还是 Visibility，不宜把 AO 简单无差别乘到所有直接光项上。
+
+---
+
+## 二十、能量补偿、法线贴图与高级 IBL
+
+### 1. 为什么 GGX 单次散射高 Roughness 时会损失镜面能量？
+
+被微面遮蔽的光并不都被吸收，它还可能在微面间进一步反射。单次散射模型仅计算第一次有效反射，忽略了部分多次路径，导致粗糙表面镜面反射偏暗。
+
+可在高质量实现中加入 Multiple Scattering Compensation 或使用更完整的 Microfacet Multiple Scattering 模型。
+
+### 2. 能量补偿是否等于给 Specular 乘常数 2？
+
+不是。补偿与 Roughness、F0、角度及 BRDF 的单次散射能量积分相关，不应随意用不依赖材质和角度的倍数替代。
+
+一种工程途径是预计算 Single Scattering Albedo，并推导剩余能量的近似散射贡献；具体公式依引擎选用的模型。
+
+### 3. 为什么法线贴图和 IBL 容易相互影响？
+
+Normal Map 改变着色法线 `N`，于是：
+
+- Diffuse Irradiance 查询的方向改变。
+- Reflect 方向 `R` 改变，镜面采样环境区域变化。
+- Macro Geometry Normal 与 Shading Normal 不一致时，可能出现能量泄露或明暗不连续。
+- 远距离高频 Normal Map 可能导致闪烁（Specular Aliasing）。
+
+因此应检查 TBN、Texture Compression、Normal Renormalization 和可能的 Shading-Normal Correction。
+
+### 4. 为什么对 Roughness 简单做 Mipmap 可能不够？
+
+Roughness/Normal Map 在一个像素 Footprint 内有统计变化。简单平均 Roughness 数值不一定等价于对实际微法线分布求平均，远处容易出现反射不稳定或能量错误。
+
+可采用 Specular AA、Toksvig、法线方差估计或其他材质过滤方法。详细背景见第四篇纹理文档。
+
+### 5. 什么是 Specular Occlusion？
+
+一般 AO 只描述某种方向积分下的环境可见性近似；镜面反射更集中在反射方向 `R` 周围，因此简单将标量 AO 乘给 Specular IBL 往往不准确。
+
+Specular Occlusion 试图根据 Roughness、NoV、反射方向和可见性近似等信息削弱**被宏观几何挡住的环境镜面反射**。
+
+它不等于微表面 Geometry Term G，两个概念有不同的遮挡尺度。
+
+### 6. Parallax-Corrected Cubemap 为什么重要？
+
+局部反射探针通常捕获了一个位置的环境，如果在附近所有像素都直接按 `R` 采样，反射几何似乎“固定在无穷远处”。
+
+Box Projection / Parallax Correction 可利用局部代理几何估算反射射线命中位置，再修改 Probe Sample Direction，使室内墙面、地板等反射更符合空间位置关系。
+
+但这仍是有限场景代理几何近似，不是真实的多次镜面 Ray Tracing。
+
+### 7. 为什么不能把 AO 无条件乘到整个 Direct + IBL 结果？
+
+AO 常被设计为环境入射遮蔽的近似，直接光的 Visibility 通常应由 Shadow Map/RT Shadow 独立处理。
+
+若把 AO 对所有 Direct Light、Emissive 和 Specular 无差别相乘，可能造成过度变暗、重复阴影或违背不同光源的实际可见性定义。
+
+---
+
+## 二十一、IBL 资源组织、性能与 RenderDoc 调试
+
+### 1. 一套基础 IBL 管线需要哪些 GPU 资源？
+
+典型资源：
+
+~~~text
+HDR Source (Equirectangular or Cubemap)
+                  |
+                  +-> Environment Cubemap
+                  |         |
+                  |         +-> Irradiance Cubemap
+                  |         |
+                  |         +-> Prefilter Cubemap (Mip Chain)
+                  |
+Material BRDF Model + Importance Sampling
+                  |
+                  +-> 2D BRDF Integration LUT
+
+Runtime:
+BaseColor / Normal / Metallic / Roughness
+                  |
+Direct Lights + Shadows
+                  |
+Diffuse Irradiance + Specular Prefilter + LUT
+                  |
+Linear HDR Scene Color -> Exposure/ToneMap/Output
+~~~
+
+### 2. 为什么每个材质不需要生成一份 BRDF LUT？
+
+对相同的 GGX/Fresnel/Geometry 模型，LUT 只依赖 `NoV` 和 Roughness，且 `F0` 可以在运行时线性组合。不同材质共享 LUT 可显著节约预计算与显存成本。
+
+但若材质采用 Clear Coat、各向异性、多次散射或不同的 BRDF 参数模型，可能需要额外数据或不同 LUT。
+
+### 3. 为什么 Prefilter Cubemap 需要 mipmap 但 BRDF LUT 不是同一种 Mip 链？
+
+Prefilter Cubemap 用 Mip **显式编码不同 Roughness 的环境卷积结果**；BRDF LUT 是以 `NoV` 和 Roughness 为二维坐标的函数表。
+
+BRDF LUT 可以有普通的过滤/Mip 策略，但其 Mip Level 并不天然表示 Roughness。把两者的 Mip 语义混淆是常见实现错误。
+
+### 4. 为什么预计算 Shader 很慢？
+
+瓶颈可能来自：
+
+- 每个 Cube Face 每个 Mip 的输出像素数。
+- 每 Texel 大量 GGX/Cosine Sample。
+- HDR Cubemap 随机方向采样成本及 Texture Cache。
+- 高精度中间 Render Target 的带宽。
+- Render Pass/Face/Mip 切换和同步。
+- 不正确的 Sample Count 与环境分辨率配置。
+
+优化可考虑 Compute Precompute、异步离线资产 Cook、减少无意义的高 Mip 像素/样本、共享 LUT、并行处理多 Probe。
+
+### 5. HDR 金属球出现黑色或反射倒转，怎么排查？
+
+优先检查：
+
+1. HDR Source/Environment Cubemap 是否实际成功加载。
+2. Cubemap 六个 Face 的方向和 Y/Up 约定。
+3. `R=reflect(-V,N)` 是否与方向约定一致。
+4. F0 是否对 Metallic 使用 Base Color。
+5. Prefilter Cubemap 是否包含完整且已初始化的 Mip。
+6. `roughness*maxMip` 是否与 Prefilter 预计算的 Roughness 分布一致。
+7. LUT 通道/UV 是否交换。
+8. 是否遗漏线性 HDR/曝光/Tone Mapping 或存在错误 sRGB 处理。
+
+### 6. 为什么粗糙度变化时高光突然出现一圈分界？
+
+常见怀疑点：
+
+- Prefilter Cubemap 的相邻 Mip 预计算不连续。
+- 使用了 Nearest Mip，而非需要的 Mip 插值。
+- Roughness 到 Mip 的映射和预处理不一致。
+- 高 Roughness 的 Precompute Sample Count 太低。
+- 纹理边界、Cubemap Face Seam 或错误的 Lod Clamp。
+
+### 7. RenderDoc 中重点检查什么？
+
+- Environment/Irradiance/Prefilter Cube 纹理与各 Mip。
+- BRDF LUT 的 R/G 通道分布与采样 UV。
+- 材质参数 BaseColor、Metallic、Roughness、Normal 的实际 Shader 输入。
+- 是否使用 sRGB Albedo 而 Linear 数据纹理。
+- Fragment Shader 里 NoV、NoL、NoH、VoH 与 N、V、R 的空间。
+- HDR Framebuffer 格式、Blend/Depth State 和 ToneMap Pass。
+- Direct/IBL 逐项调试输出，定位哪个项造成偏差。
+
+### 8. 如何做成本和画质的量化对比？
+
+固定场景与相机，分别测量：
+
+- Prefilter Face Resolution、Mip Count、Sample Count。
+- BRDF LUT Size 与生成成本。
+- 运行时 IBL Texture Fetch、各向异性与 Cache 行为。
+- 多 Reflection Probe 的绑定/采样成本。
+- 不同粗糙度金属球的高光、环境亮点与误差。
+
+使用 GPU 时间统计和厂商性能计数器；RenderDoc 擅长资源/Draw Call/Shader 状态验证，但不是所有硬件瓶颈的完整计数器来源。
+
