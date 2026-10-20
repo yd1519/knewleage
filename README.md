@@ -1,6 +1,6 @@
 # Knowledge Base
 
-用于整理和积累 C++、计算机图形学与游戏引擎开发相关的学习文档、面试八股和复习笔记。
+用于整理和积累 C++、计算机图形学、游戏引擎与个人项目相关的学习文档、面试八股和复习笔记。
 
 ## 目录
 
@@ -32,11 +32,19 @@
 | [09 - HDR 与后处理](Graphics/09-HDR%E4%B8%8E%E5%90%8E%E5%A4%84%E7%90%86.md) | Linear HDR/sRGB、Luminance、EV/自动曝光、Histogram/Metering Mask、Pre-Exposure、Reinhard/ACES Fitted、Bloom、Color Grading LUT、HDR10/PQ 与 RenderDoc |
 | [10 - 全局光照与光线追踪](Graphics/10-%E5%85%A8%E5%B1%80%E5%85%89%E7%85%A7%E4%B8%8E%E5%85%89%E7%BA%BF%E8%BF%BD%E8%B8%AA.md) | GI、渲染方程、路径追踪、NEE/MIS、Russian Roulette、Ray–Triangle/AABB、BVH/SAH、TLAS/BLAS、DXR/Vulkan RT、DDGI、SSGI、ReSTIR、SVGF 与性能调试 |
 
+### Projects：项目深挖
+
+| 文档 | 内容 |
+|---|---|
+| [01 - Scrapbound《废械星途》](Projects/01-Scrapbound-%E5%BA%9F%E6%A2%B0%E6%98%9F%E9%80%94.md) | 一个月限时游戏项目的完整复盘：模块化载具、动态质量属性、体素浮力、逐零件阻力、确定性 PCG、候选世界验证与事务式提交、玩法闭环及面试问答 |
+| [02 - UE Texture Editor 纹理分析工具](Projects/02-UE-Texture-Editor-%E7%BA%B9%E7%90%86%E5%88%86%E6%9E%90%E5%B7%A5%E5%85%B7.md) | AI 辅助实现的引擎工具复盘：双数据源、异步 GPU Readback、Source Art、Pixel Inspector、Pixel Values、Histogram、False Color、代码审读、贡献边界及面试口径 |
+
 ### 后续规划
 
 - **C++ 后续专题：** 面试代码题、标准库实现分析、C++ 性能与并发专题深化。
 - **计算机图形学后续专题：** 当前 01–10 已完成；后续可深入光谱渲染、体积渲染、神经渲染与高级采样。
 - **游戏引擎：** 引擎架构、资源管理、场景与实体系统、动画、物理、渲染、工具链与性能优化。
+- **项目深挖：** 继续补充 OpenGLRenderer、腾讯实习和不鸣科技实习中的代表性技术问题。
 
 ## 复习方式
 
