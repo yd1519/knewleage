@@ -1381,3 +1381,526 @@ HDR 场景中的亮度数值可能远大于 SDR UI 的 1.0 参考范围。如果
 
 它至少漏掉了 HDR10 的显示色域、绝对亮度映射、PQ 输出编码、交换链/平台支持与可能的元数据。ACES 风格曲线只是可能参与其中的一部分 Tone Mapping。
 
+
+---
+
+## 十八、后处理 Pass 顺序应该怎样设计？
+
+### 1. 为什么不能把所有 Postprocess 当成随意交换顺序的滤镜？
+
+很多运算不满足交换律。曝光与 Tone Mapping：
+
+$$
+T(E C)\ne E T(C).
+$$
+
+HDR Bloom 和 Tone Mapping：
+
+$$
+T(C+B)\ne T(C)+T(B).
+$$
+
+Color Grading 变换可能依赖输入的颜色空间与亮度范围，TAA 依赖 History 和一致的 Pre-Exposure，UI 需要独立的显示范围，因此 Pass 顺序与数据语义同样重要。
+
+### 2. 一种自洽的 HDR 后处理方案是什么？
+
+~~~text
+Geometry / Shadow / PBR / Indirect Lighting
+                     |
+                     v
+           Linear HDR Scene Color
+                     |
+           +---------+----------------------+
+           |                                |
+           v                                v
+  Luminance Metering                 Bloom Prefilter
+  / Histogram                         / Pyramid
+           |                                |
+           v                                v
+   Target Exposure                  Bloom Reconstruct
+           |                                |
+           v                                |
+ Exposure Adaptation                       |
+           |                                |
+           +--------------------+-----------+
+                                |
+                                v
+               Scene HDR + Bloom Composition
+                                |
+                                v
+         TAA / TAAU (if this is chosen order)
+           [Velocity / History / Pre-Exposure]
+                                |
+                                v
+             Exposure + Tone / Color Grading
+                                |
+                                v
+            Gamut Mapping / Output Encoding
+                                |
+                                v
+                    UI Composite / Present
+~~~
+
+**示意，不是唯一标准。** 有些引擎在 Bloom 之前运行 TAA/TAAU，有些在 TAA 后再生成/合成 Bloom；Metering 可能使用 TAA 后颜色或特殊降采样，最终 UI 合成可能在 HDR Output Transform 前于已知绝对亮度空间内进行。
+
+### 3. 为什么 Metering 依赖的 Color Buffer 选择需要明确？
+
+如果 Histogram 对 Current Pre-Exposed Scene Color 统计，却按原始 Scene-Linear 标定解释 Bin Range，就会统计错误。若选择 Bloom/Tone Map 后的颜色，则亮度分布可能受光晕或曲线压缩影响。
+
+因此 Metering Pass 的输入、Pre-Exposure Scale 和 Histogram Range 必须是明确设计的 Frame Metadata。
+
+### 4. TAA 在 Bloom 前还是后更好？
+
+不同方案各有问题：
+
+- TAA 在 Bloom 前：Bloom 使用已稳定的 HDR Color，有机会减少高光采样闪烁；但 Bloom 产生的结果不再经同一个 TAA History。
+- Bloom 在 TAA 前：Bloom 也可能被时域平滑；但如果高亮扩散变化很大，History Clip/Reactive 需要避免光晕拖尾。
+- 分离时域：对 Bloom 或亮点使用专门稳定策略，再与 TAA 结果合成。
+
+必须按目标画质和渲染管线验证，不能简单断言某一种顺序绝对正确。
+
+### 5. Exposure 应在 TAA 前应用还是后应用？
+
+很多实时管线使用 Pre-Exposure 让 TAA 处理数值范围合适的 HDR Scene Buffer，并在最后应用剩余 Exposure Scale；还有其它方案可将曝光适配融入时域处理。
+
+关键条件是**Current 和 History 同一数值语义**、曝光历史变化被正确转换、最终 Tone Mapper 收到设计好的 Exposed Color。
+
+### 6. 为什么每个 Postprocess Pass 都需要知道颜色语义？
+
+同一张 `RGBA16F` Texture 可能储存：
+
+- Scene Linear HDR。
+- Pre-Exposed Scene Linear HDR。
+- Exposed HDR。
+- Tone-Mapped Display-Linear SDR。
+- 未编码/已编码的 Display RGB。
+- 某种 Log/PQ 内部编码。
+
+这些语义如果没有在资源命名、Shader Uniform 或 RenderGraph Metadata 中明确，极易出现重复 Gamma、错误曝光与色彩不一致。
+
+---
+
+## 十九、OpenGLRenderer：HDR Framebuffer 与最终输出实现
+
+### 1. 怎样分配一个 HDR Scene Color Target？
+
+下面使用 OpenGL 4.5 Direct State Access，创建一个带 `RGBA16F` Scene Color 与深度纹理的 FBO：
+
+~~~cpp
+GLuint CreateHDRFramebuffer(
+    GLsizei width, GLsizei height,
+    GLuint& outColor, GLuint& outDepth)
+{
+    glCreateTextures(GL_TEXTURE_2D, 1, &outColor);
+    glTextureStorage2D(
+        outColor, 1, GL_RGBA16F, width, height);
+    glTextureParameteri(outColor, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTextureParameteri(outColor, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTextureParameteri(outColor, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTextureParameteri(outColor, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glCreateTextures(GL_TEXTURE_2D, 1, &outDepth);
+    glTextureStorage2D(
+        outDepth, 1, GL_DEPTH_COMPONENT32F, width, height);
+    glTextureParameteri(outDepth, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTextureParameteri(outDepth, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    GLuint fbo = 0;
+    glCreateFramebuffers(1, &fbo);
+    glNamedFramebufferTexture(
+        fbo, GL_COLOR_ATTACHMENT0, outColor, 0);
+    glNamedFramebufferTexture(
+        fbo, GL_DEPTH_ATTACHMENT, outDepth, 0);
+
+    GLenum status = glCheckNamedFramebufferStatus(
+        fbo, GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+    {
+        // Production code logs the status and destroys resources.
+        return 0;
+    }
+
+    return fbo;
+}
+~~~
+
+**工程限制：** 为突出 HDR FBO 构造，本函数省略完整 RAII、失败回收、Resize、MSAA、FBO DrawBuffer 配置的所有替代路径，以及 OpenGL Error Handling。真正项目还需确认最大纹理尺寸、GL Context 与 Render Target 生命周期。
+
+### 2. 为什么 Scene HDR FBO 要与 Final SDR Backbuffer 分离？
+
+Scene HDR Buffer 中的 `RGB>1` 需要保留供 Bloom/Exposure/Tone Mapping 使用；默认 Backbuffer 往往由窗口系统设置特定 SDR/HDR 格式与 Output Encoding 约定，不能假设它可以安全保存同样的线性 HDR 数据。
+
+先渲染到浮点离屏目标，再执行 Postprocess，最后才写 Present Target，能让每一步数据含义更清晰。
+
+### 3. 最终 SDR 输出 Shader 的示意写法
+
+假设：
+
+- 当前 HDR Scene Texture 未经 Tone Mapping，存 Linear RGB。
+- `uExposure` 是定义好的总体曝光系数。
+- 输出目标使用**线性 UNORM 纹理/Framebuffer，且 GL_FRAMEBUFFER_SRGB 不会自动编码**。
+- 因此 Shader 最后**手动执行一次 sRGB Encode**。
+
+~~~glsl
+#version 450 core
+
+in vec2 vUV;
+layout(location=0) out vec4 outColor;
+
+uniform sampler2D uHDRScene;
+uniform float uExposure;
+
+vec3 ToneMapACESInspiredFit(vec3 exposedRGB)
+{
+    vec3 x = max(exposedRGB, vec3(0.0));
+    vec3 a = x * (2.51 * x + 0.03);
+    vec3 b = x * (2.43 * x + 0.59) + 0.14;
+    return clamp(a / b, vec3(0.0), vec3(1.0));
+}
+
+vec3 EncodeSRGB(vec3 linearRGB)
+{
+    vec3 x = clamp(linearRGB, vec3(0.0), vec3(1.0));
+    vec3 low = 12.92 * x;
+    vec3 high = 1.055 * pow(x, vec3(1.0 / 2.4)) - 0.055;
+    return mix(high, low,
+               lessThanEqual(x, vec3(0.0031308)));
+}
+
+void main()
+{
+    vec3 scene = texture(uHDRScene, vUV).rgb;
+    vec3 exposed = scene * uExposure;
+    vec3 mappedLinear = ToneMapACESInspiredFit(exposed);
+    vec3 encoded = EncodeSRGB(mappedLinear);
+    outColor = vec4(encoded, 1.0);
+}
+~~~
+
+**重要：** GLSL `mix(vec3,vec3,bvec3)` 是标准的逐通道布尔选择重载（在符合支持的 GLSL 版本中）。本示例只给出一种明确的手动编码流程；若目标使用可自动 sRGB 编码的附件并启用 `GL_FRAMEBUFFER_SRGB`，就应改为直接输出适当 Display-Linear RGB，不能再手动 Encode 一次。
+
+### 4. 为什么无法对“默认 Framebuffer”统一给出一行正确的 Gamma 代码？
+
+默认 Framebuffer 的实际 Color Format/Color Space、Window System、Swapchain 选择、`GL_FRAMEBUFFER_SRGB` 状态可能不同。
+
+在一个 GL Window 上正确的手动编码策略，在另一个 SRGB-Capable/Auto-Encode Backbuffer 上可能双重编码。应通过平台/上下文配置和测试色阶确认，而不是只复制 Shader 里的 `pow(color,1/2.2)`。
+
+### 5. 为什么 Display Target 如果是 HDR10 不能复用上面的最终 Shader？
+
+因为它只输出 sRGB 编码的 SDR 范围颜色，没有 Wide Gamut、绝对亮度/Paper White 映射或 PQ Encoding。HDR10 输出需要独立的 Display Transform 与 Swapchain 路径。
+
+### 6. 如果已经使用 Scene Pre-Exposure 怎么修改？
+
+假设 Scene Buffer 存 `C_stored=P*C_scene`，而最终需要曝光 `E`，Tone Mapper 前应：
+
+~~~glsl
+vec3 exposed = storedScene * (exposure / preExposure);
+~~~
+
+前提是你的引擎 `preExposure` 的定义就是之前文档所述的乘法尺度 `P`，且 Bloom/History 已处于兼容缩放域。不能既在 Lighting Shader 应用 `E`，又在 Postprocess 无条件乘一遍 `E`。
+
+---
+
+## 二十、Exposure Metering Mask 的工程实践
+
+### 1. 为什么游戏往往需要给 Auto Exposure 加“关注主体”的权重？
+
+相机视野变化可能包含大面积天空、强烈灯光或黑暗墙壁，但玩家主要关注角色、准星附近或交互区域。
+
+以屏幕位置为输入的 Metering Mask 能让曝光系统对主体区域更加敏感，并降低边缘极端亮度对曝光的干扰。
+
+### 2. 一个简单的中心权重怎么写？
+
+令屏幕 UV `u,v∈[0,1]`，以屏幕中心 `c=(0.5,0.5)` 为参考：
+
+$$
+r^2=(u-0.5)^2+(v-0.5)^2.
+$$
+
+可采用高斯式权重：
+
+$$
+\boxed{
+w(u,v)=
+w_{\min}+
+(1-w_{\min})\exp\left(-\frac{r^2}{2\sigma^2}\right).
+}
+$$
+
+其中 `sigma` 控制 Metering Region 的宽度，`w_min` 防止边缘完全失去权重。此公式忽略画面非方形 Aspect Correction；真实项目可对 UV 距离进行宽高比校正，或在 Pixel Space 计算。
+
+### 3. GLSL 中怎样计算权重？
+
+~~~glsl
+float CenterMeteringWeight(vec2 uv, vec2 renderSizePx,
+                           float radiusPixels, float minWeight)
+{
+    vec2 deltaPixels = (uv - vec2(0.5)) * renderSizePx;
+    float sigma = max(radiusPixels, 1.0);
+    float d2 = dot(deltaPixels, deltaPixels);
+
+    return mix(
+        clamp(minWeight, 0.0, 1.0),
+        1.0,
+        exp(-0.5 * d2 / (sigma * sigma))
+    );
+}
+~~~
+
+这使用 Pixel Space 距离，使不同 Aspect Ratio 下的中心区域可以用统一 Pixel Radius 表示。如果目标是归一化视角/屏幕占比，应该采用另一种明确的尺度。
+
+### 4. 怎样把 Metering Mask 正确接进 Histogram？
+
+如果一个像素的权重 `w_i∈[0,1]`，严格的 Weighted Histogram 应让该样本为相应 Bucket 贡献数值 `w_i` 而不是无条件 1。
+
+`uint` Histogram 可以通过固定点编码（例如 `round(w_i*S)`）再 Atomically Add，但要考虑：
+
+- 量化误差。
+- 总 Count 上界与 Overflow。
+- Reduction 用相同 Scale 解释权重。
+- 部分像素为零权重时防止除零。
+- Workgroup 内 Weighted Accumulation 的 Atomic 容量。
+
+另一个方案是使用浮点累加/归并，但要确认目标 GPU 的原子浮点支持与精度/性能。**不要把非加权 uint Histogram 直接当成已经使用了 Metering Mask 的结果**。
+
+### 5. 为什么角色 Mask 有时比单纯中心权重更合适？
+
+玩家角色可能不在屏幕正中心；过场动画、第三人称偏移镜头也可能把关注对象放在构图侧边。
+
+可以对角色屏幕包围区、Focus Point 或专门的 Metering Texture 赋权，不过要处理遮挡、角色突然离开屏幕、Mask 闪烁与镜头切换时的时间稳定性。
+
+### 6. Metering Mask 与后处理 Vignette 是一回事吗？
+
+不是：
+
+- Metering Mask：影响亮度统计，从而影响**整张图**的相机曝光。
+- Vignette：直接改变屏幕边缘的显示亮度/颜色，是成像风格或镜头衰减效果。
+
+即使二者都以屏幕中心到边缘的距离构造函数，它们在 Pipeline 中的职责完全不同。
+
+### 7. 为什么 Exposure Histogram 和 Texture Editor 的颜色直方图不能直接互换？
+
+Texture Editor 的 Histogram 可能按 Source Art 的 `R/G/B/A` 值或解码纹理数据统计，而 Auto Exposure Histogram 通常按 HDR Scene 的**线性 Luminance、Log2 Bin、Metering 权重及 Percentile**统计。
+
+数据输入、色彩空间、单位、Bin 映射和权重语义完全不同。GPU Compute/Reduction/Async Readback 的工程设计可复用，但算法定义不能直接照搬。
+
+---
+
+## 二十一、其它常见 Postprocess：Vignette、Grain、Dithering 与 Lens Effects
+
+### 1. Vignette 是什么？
+
+Vignette 是图像边缘比中心暗的视觉效果，可以模拟光学镜头/传感器成像衰减，也可以作为艺术手段突出中心主体。
+
+它通常属于 Display/Color Postprocess，不应该影响物理光源照明的 BRDF 或场景 Shadow Visibility。
+
+### 2. Film Grain 为什么会加入已经很干净的画面？
+
+Grain 是有意设计的纹理噪声或胶片风格，使图像更有质感、改善部分量化/低频大块色阶观感。但它不能替代正确的 Dithering 或 Tone Mapping，过强 Grain 会降低 TAA 稳定性/压缩效率。
+
+### 3. Dithering 与 Film Grain 有什么区别？
+
+Dithering 有意加入受控的小幅噪声，以缓解量化产生的 Banding；Film Grain 更多是风格化效果，虽然二者都可能用到噪声。
+
+对于最终 8-bit SDR 输出，在正确的 Output Encoding/Quantization 之前应用适当 Dither，有机会让平滑色阶更自然，但噪声幅度/统计和色彩空间必须匹配。
+
+### 4. Chromatic Aberration 是什么？
+
+色差是不同波长的光在光学系统中发生不同成像位置/倍率的现象。实时后处理通常以 RGB 通道之间的空间采样偏移进行风格化近似。
+
+它不是 PBR 的色散/折射方程精确求解，且过量会损害清晰度和边缘视觉质量。
+
+### 5. Depth of Field 与 Motion Blur 属于同一类 Blur 吗？
+
+它们都可以通过 Screen-Space/Postprocess 重建，但成像机制不同：
+
+- Depth of Field：有限镜头光圈导致不在焦平面上的点形成 Circle of Confusion，产生景深模糊。
+- Motion Blur：有限快门时间对运动中的场景进行时间积分，产生运动方向模糊。
+
+二者的过滤核、Depth/Occlusion 处理和采样时间维度不同，不能简单用一个 Gaussian Blur 代替。
+
+### 6. 为什么这些效果都和 TAA 有关系？
+
+TAA 利用 History 做时间重建；Film Grain、Noise、Motion Blur、DOF、Vignette 和 Camera Shake 可能改变颜色稳定性、运动估计或重投影有效性。
+
+例如 Film Grain 通常不希望被 TAA 长时间平均掉；Motion Blur 应与真实运动及 TAA 的有意/无意历史混合区分。因此 Pass Order 和 History State 很关键。
+
+### 7. 什么是 Lens Dirt？
+
+Lens Dirt 将 Bloom/高亮分布与镜头污渍纹理组合，产生可见的眩光污渍艺术效果。它一般是对光晕信号的视觉调制，而不是光照系统中的几何遮挡。
+
+---
+
+## 二十二、性能优化：Bloom、Histogram、Tone Mapping 谁更贵？
+
+### 1. 哪些后处理容易受 Memory Bandwidth 限制？
+
+典型全屏 Pass 常涉及大量 Texture Read/Render Target Write；尤其 HDR 格式每像素字节数较多，多次 Fullscreen Ping-Pong、Bloom Mip 生成和 TAA History 会产生明显带宽与 Cache 压力。
+
+但 Compute Histogram 也可能受 Atomic Contention 影响；Tone Mapping 可能有复杂 Color Math 与 3D LUT Fetch；不能无条件断言所有 Postprocess 都只受 Bandwidth 限制。
+
+### 2. 常见 Render Target 每像素占多少字节？
+
+以未压缩、单样本、忽略 Alignment/Compression/Metadata 为例：
+
+| 格式 | 名义每像素字节数 | 典型用途 |
+|---|---:|---|
+| RGBA8 | 4 | SDR/某些后处理缓冲 |
+| R16F | 2 | 单通道 HDR/亮度/曝光相关数据 |
+| RG16F | 4 | 速度/双通道统计 |
+| RGB16F | 6（名义） | 某些 RGB 浮点数据；格式/API 支持和布局需确认 |
+| RGBA16F | 8 | HDR Scene Color、TAA History |
+| RGBA32F | 16 | 高精度中间结果/参考测试 |
+
+实际 GPU Allocation、Tile Memory、压缩以及多样本格式会改变真实内存/带宽，不能以表中名义字节数预测全部成本。
+
+### 3. 1080p 的一张 RGBA16F 约占多少空间？
+
+$$
+1920\cdot1080\cdot8
+=16\,588\,800\ \mathrm{bytes}.
+$$
+
+折算为二进制 MiB：
+
+$$
+\boxed{
+\frac{16\,588\,800}{1024^2}
+\approx15.82\ \mathrm{MiB}.
+}
+$$
+
+这是**单张无多样本、无 Mip、无额外分配开销**的名义大小。两张 TAA History、Bloom Mips、HDR Ping-Pong 等会另外占空间。
+
+### 4. 为什么 Histogram 适合先 Downsample？
+
+自动曝光只需要稳定统计，通常无需每像素精确保存所有空间细节。合理降采样可减少 Image Load、Atomics、Global SSBO Write 和资源争用；但要验证极亮小光源、Metering Mask 和分位数是否被低分辨率样本错误稀释。
+
+### 5. 为什么 Bloom Pyramid 通常比一次全分辨率大核 Blur 更高效？
+
+低分辨率 Mip 的像素数按尺寸平方递减，大范围的低频 Blur 可在较小纹理上计算，减轻 Texture Fetch/Filtering 成本。
+
+不过多 Pass Transition、Upsample 和额外资源仍有代价，应比较总 GPU 时间和最终光晕质量。
+
+### 6. 怎样降低 Fullscreen Pass 数量？
+
+- 将多个兼容的 Color Transform 合并进同一个 Pass。
+- 将 Static Color Grading Operations Baking 到 3D LUT。
+- 用 Compute/Tiled Pass 或 Pass Fusion 组合部分算子。
+- 减少不必要的 HDR Full Resolution Intermediate Copies。
+- 合理选择 Bloom Mip Count、分辨率、Filter Tap。
+- 管理临时资源别名与 FrameGraph Lifetime。
+
+**注意：** Pass Fusion 可能增加寄存器压力、Shader 复杂度与输入依赖，不保证一定更快；要 GPU Profiling 验证。
+
+### 7. 为什么不能用 CPU Frame Time 判断后处理是否 GPU 瓶颈？
+
+CPU 可能在提交 Draw/Dispatch 时与 GPU 异步执行；真正的 GPU 后处理成本需要 Timestamp Query/GPU Profiler 等测量。
+
+在 OpenGL 中插入会同步等待 GPU 的 Query/Readback 也可能影响性能结果，应使用延迟读取、GPU Timestamp 或工具侧时间线分析。
+
+### 8. HDR Float Format 和 Bloom 精度怎样取舍？
+
+Half-Float `RGBA16F` 经常在范围/精度/带宽之间取得较好的平衡，但大 HDR 值和微小暗部数值可能带来 Precision/Underflow/Overflow 问题。
+
+某些 Bloom Mips 可以使用较低精度/较小分辨率；而 Metering/Exposure Reduction 需要避免在极值场景中的数值异常和 Histogram Overflow。应按数据范围选格式，而不是什么都用 RGBA32F。
+
+---
+
+## 二十三、RenderDoc 与 HDR 后处理问题的诊断流程
+
+### 1. 画面整体过曝，应该先查什么？
+
+建议按阶段逐项显示：
+
+1. Raw Linear Scene HDR Color：PBR/Light Strength 是否已经异常。
+2. Luminance Heatmap：测光输入是否使用正确线性颜色和 Primaries。
+3. Histogram：Bin Mapping、Clip Range、Mask、Percentile 是否合理。
+4. Target Exposure：Middle Gray/Compensation 是否正确。
+5. Adapted Exposure：是否方向反了或速度过快。
+6. Pre-Exposure Ratio：是否重复乘/除或 History 不一致。
+7. Tone Mapping Output：是否输入范围与曲线预期不符。
+8. Final Encoding：是否重复 sRGB/Gamma 或使用错误 HDR Display 模式。
+
+### 2. 为什么“模型 Albedo 是正确的，颜色仍发灰/发白”？
+
+可能原因很多：
+
+- BaseColor Texture sRGB Flag 错误。
+- Lighting 阶段错误使用了编码后的颜色。
+- 曝光目标/Key 设置不合理。
+- Reinhard/Filmic 曲线压缩使对比度降低。
+- Tone Map 后重复 sRGB Encode。
+- Output Gamut/Display Calibration 不匹配。
+- Color Grading LUT 输入 Domain 不对。
+
+正确做法是查看**每个阶段具体数值**，而非仅调整 Albedo。
+
+### 3. 为什么画面突然走进屋子时曝光不停抖动？
+
+检查：
+
+- Histogram Sampling 是否受低分辨率取样和小亮点影响。
+- Percentile/Highlight Weight 是否稳定。
+- Exposure Adaptation 是否使用 Delta Time 和正确的 Speed。
+- Camera Cut/Resize 是否错误清空/重用 Exposure History。
+- Pre-Exposure 与 Metering 是否形成错误反馈。
+- Bloom/TAA 是否在错误的空间进入 Metering。
+
+### 4. 为什么调 Bloom Threshold 时光晕有时完全没有？
+
+确认：
+
+- Prefilter 读取的是 Scene Linear HDR 还是已 Tone-Mapped SDR。
+- Threshold 是否对应同一种数值/曝光尺度。
+- 是否提前 Clamp 到 1.0。
+- Bloom Bright Pass/Mip Chain 是否真正生成数据。
+- Upsample/Compose Pass 是否绑定了正确纹理和强度。
+- Bloom Render Target Filter/Mip 资源是否完整。
+
+### 5. 为什么画面有不连续色带（Banding）？
+
+可能来源：
+
+- HDR→SDR/8-bit Quantization。
+- 不合适的 Tone Curve 或 Grading LUT Resolution。
+- Output Gamma/Transfer 不正确。
+- 某个低精度中间 RT 过早量化。
+- 缺少适当 Dithering。
+- Bloom/Blur 的采样不足。
+
+推荐用长渐变 Ramp Test，在 Linear HDR、Tone-Mapped Linear 和 Encoded Output 三个阶段分别查看。
+
+### 6. 为什么 HDR 输出在不同显示器观感差别很大？
+
+HDR Display 的最大亮度、黑位、色域、Tone Mapping 和系统显示设置可能不同。没有一致的 Paper White、Peak Brightness、Gamut Mapping 和 PQ/HLG Output Transform 就无法保证一致观感。
+
+如果应用运行在 SDR Backbuffer，却以为自己已输出 HDR10，最终 HDR Scene Buffer 再亮也不能说明显示链路正确。
+
+### 7. TAA 为什么会因为 Auto Exposure 出现 Ghosting？
+
+如果 History 的 Pre-Exposure Scale 来自 `P_{t-1}`，当前 Color 使用 `P_t`，但 History 没做 Scale Ratio 校正，同一物理表面就会以不同数字亮度混合，形成残影或突然的亮度变化。
+
+因此应结合第八篇的 Jitter/Velocity/History Reprojection 调试，同时可视化 History Before/After Exposure Conversion。
+
+### 8. RenderDoc 重点看哪些资源？
+
+| Debug 资源 | 用途 |
+|---|---|
+| SceneColor HDR | 检查 Lighting 是否保留高亮数值 |
+| Linear Luminance | 检查空间/通道系数 |
+| Histogram SSBO | 检查 Bin、黑色样本及分位数 |
+| Exposure Buffer | Target/Current/Pre-Exposure |
+| Bloom Prefilter | 检查 Threshold、Soft Knee |
+| Bloom Pyramid | 检查 Downsample/Blur/Upsample |
+| TAA History | 检查曝光一致性/残影 |
+| Tone-Mapped Color | 检查 Curve 是否合理 |
+| Grading LUT | 检查 LUT Domain、采样坐标 |
+| Final Output | 检查 Display Encoding/Gamut |
+
+### 9. 为什么 Texture Viewer 显示 HDR 很亮或很暗不能单独证明 Shader 错？
+
+HDR Texture Viewer 通常自身具有显示范围、缩放或亮度映射控制；工具显示的预览可能不是原始 Float RGB 直接线性映射到显示器。
+
+应查看具体像素的**原始数值**及格式、显示范围与所有后续变换，而不是只根据预览是否灰白判断算法错误。
+
