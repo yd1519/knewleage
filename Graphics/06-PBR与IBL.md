@@ -840,7 +840,8 @@ $$
 ~~~glsl
 vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness)
 {
-    float alpha = max(roughness * roughness, 1e-4);
+    float r = clamp(roughness, 0.04, 1.0);
+    float alpha = r * r; // same GGX mapping as DistributionGGX
     float a2 = alpha * alpha;
 
     float phi = 2.0 * PI * Xi.x;
@@ -1049,7 +1050,7 @@ vec2 IntegrateBRDF(float NdotV, float roughness, uint sampleCount)
 }
 ~~~
 
-**依赖说明：** `Hammersley`、`GeometrySmithForLUT` 是后文单独解释的接口，这段核心示例不是一个无需其它声明即可编译的完整 Shader。对 `NoV≈0` 的边界要单独处理，避免除零。
+**依赖说明：** `Hammersley`、`GeometrySmithForLUT` 在后文给出；这段核心示例不是一个无需其它声明即可编译的完整 Shader。`sampleCount` 必须大于零；对 `NoV≈0` 的边界要单独处理，避免除零。
 
 ### 5. LUT A/B 在 Metallic 与 Dielectric 上如何复用？
 
@@ -1277,7 +1278,8 @@ float GeometryGGXExactG1(float NdotX, float roughness)
 {
     if (NdotX <= 0.0) return 0.0;
 
-    float alpha = max(roughness * roughness, 1e-4);
+    float r = clamp(roughness, 0.04, 1.0);
+    float alpha = r * r;
     float alpha2 = alpha * alpha;
 
     float root = sqrt(alpha2 +
