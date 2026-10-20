@@ -29,11 +29,12 @@
 | [06 - PBR 与 IBL](Graphics/06-PBR%E4%B8%8EIBL.md) | 微表面 Cook–Torrance、Fresnel、GGX、Smith、Metallic/Roughness、Disney BRDF、Diffuse/Specular IBL、Split-Sum、BRDF LUT、GLSL 与 RenderDoc |
 | [07 - 阴影技术](Graphics/07-%E9%98%B4%E5%BD%B1%E6%8A%80%E6%9C%AF.md) | Shadow Mapping、Depth/Slope/Normal Bias、PCF/PCSS、CSM、点光 Cubemap、VSM/EVSM、Virtual Shadow Maps、Contact/RT Shadow 与性能调试 |
 | [08 - 抗锯齿技术](Graphics/08-%E6%8A%97%E9%94%AF%E9%BD%BF%E6%8A%80%E6%9C%AF.md) | Sampling/Aliasing、SSAA/MSAA/A2C、FXAA/SMAA、TAA Jitter/Velocity/History、Disocclusion/Ghosting、TAAU/Dynamic Resolution 与 RenderDoc |
+| [09 - HDR 与后处理](Graphics/09-HDR%E4%B8%8E%E5%90%8E%E5%A4%84%E7%90%86.md) | Linear HDR/sRGB、Luminance、EV/自动曝光、Histogram/Metering Mask、Pre-Exposure、Reinhard/ACES Fitted、Bloom、Color Grading LUT、HDR10/PQ 与 RenderDoc |
 
 ### 后续规划
 
 - **C++ 后续专题：** 面试代码题、标准库实现分析、C++ 性能与并发专题深化。
-- **计算机图形学后续专题：** HDR/后处理、全局光照。
+- **计算机图形学后续专题：** 全局光照与光线追踪。
 - **游戏引擎：** 引擎架构、资源管理、场景与实体系统、动画、物理、渲染、工具链与性能优化。
 
 ## 复习方式
