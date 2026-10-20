@@ -1533,3 +1533,352 @@ BRDF LUT 可以有普通的过滤/Mip 策略，但其 Mip Level 并不天然表�
 
 使用 GPU 时间统计和厂商性能计数器；RenderDoc 擅长资源/Draw Call/Shader 状态验证，但不是所有硬件瓶颈的完整计数器来源。
 
+
+---
+
+## 二十二、秋招高频面试题与连续追问
+
+### Q1：PBR 和传统 Phong/Blinn–Phong 的核心区别？
+
+PBR 倾向于使用符合能量约束、互易性和可解释材质参数的反射模型。Phong/Blinn–Phong 是经验式高光模型，若没有额外归一化与能量分配，不能保证材质能量合理。
+
+### Q2：为什么现代 PBR 常用 Microfacet Model？
+
+真实材料表面有统计分布的微小镜面朝向。Microfacet Model 用分布、Fresnel 和可见性解释镜面反射的形状与角度依赖。
+
+### Q3：Cook–Torrance BRDF 的三项 D、F、G 分别是什么意思？
+
+D 是微表面法线分布；F 是微面 Fresnel 反射比例；G 是微面的 Masking–Shadowing。完整镜面项为 `DFG/(4 NoV NoL)`。
+
+### Q4：为什么 Microfacet 的 Half Vector 是 normalize(V+L)？
+
+在 L、V 都从表面向外的约定下，满足镜面反射的微面法线平分二者方向。
+
+### Q5：为什么要除以 4 NoV NoL？
+
+来自微面反射方向变化和投影面积的几何换算，是 Cook–Torrance BRDF 的关键归一化部分。
+
+### Q6：NDF D 可以直接当成方向 PDF 吗？
+
+不能直接等同。按 NDF 采样 Half Vector 的常见 PDF 为 `pH=D NoH`，积分测度是立体角。
+
+### Q7：GGX 与 Blinn–Phong NDF 有什么主要区别？
+
+GGX 有较长的反射尾部，更容易拟合一些真实材料的宽尾高光。二者参数并不一一对应。
+
+### Q8：GGX 的 Roughness 到 Alpha 如何映射？
+
+本篇约定 `alpha=r²`，NDF 分子使用 `alpha²=r⁴`。必须核对每个实现的参数定义。
+
+### Q9：什么是 Schlick Fresnel？
+
+`F=F0+(1-F0)(1-VoH)^5`，近似描述 Fresnel 随微面入射角变化。
+
+### Q10：F0 为什么常用 0.04？
+
+空气到折射率约 1.5 的常见介质正入射 Fresnel 约为 0.04，是工作流的典型近似，而不是所有材质精确恒等。
+
+### Q11：为什么金属的反射通常有颜色？
+
+金属光学响应具有随波长变化的复折射率；简单 Metallic–Roughness 工作流用 Base Color 近似有色 F0。
+
+### Q12：Schlick Fresnel 应该使用 NoV 还是 VoH？
+
+对 Cook–Torrance 微面反射，使用 `VoH`（或等价的 `LoH`）描述入射方向与参与反射的微面法线夹角。
+
+### Q13：Smith G 和 Shadow Map 有何区别？
+
+Smith G 描述材质微表面的遮蔽；Shadow Map 描述宏观场景中光源到当前点的遮挡。
+
+### Q14：为什么 Schlick–GGX 的 k 不一定在 Direct 和 IBL 中相同？
+
+不同近似的拟合目标和积分方式不同；直接光常见 `k=(r+1)²/8`，某些 IBL 近似使用 `k=alpha/2`。实际 LUT/Shader 应保证约定一致。
+
+### Q15：Metallic=1 时为什么漫反射一般为 0？
+
+简化金属模型以有色镜面反射为主，不使用一般电介质内部散射的 Lambert Diffuse 近似。
+
+### Q16：Metallic=0 的塑料为什么仍存在 Specular？
+
+空气与介质折射率不同，非金属同样有 Fresnel 反射。
+
+### Q17：Metallic=0.5 在物理上是什么意思？
+
+往往是材质混合、Texture Filtering 或美术控制的中间值，不是所有纯材料统一的独立物理常数。
+
+### Q18：Roughness 增加就应该降低 F0 吗？
+
+不是。Roughness 控制微面方向分布，F0 定义法线正入射时的 Fresnel。高阶多次散射模型可能改变整体有效反射，但概念不同。
+
+### Q19：为什么基础 GGX 高 Roughness 金属可能偏暗？
+
+单次散射模型忽略被遮挡微面之间可能发生的多次反射，需要相应多次散射补偿。
+
+### Q20：Disney Principled 与基本 Cook–Torrance 有何区别？
+
+Disney Principled 是扩展的材质模型与工作流，可包含专门 Diffuse、Clear Coat、Sheen、Anisotropy 等；GGX Cook–Torrance 是其可能使用的镜面组件之一。
+
+### Q21：IBL 的全称和数学意义？
+
+Image-Based Lighting，把环境图中的 Radiance 作为入射光照，对表面 BRDF 进行方向积分或其预计算近似。
+
+### Q22：为什么 PBR 金属球只有 Direct Light 时会很黑？
+
+金属 Diffuse≈0，镜面反射依赖环境方向入射 Radiance；缺失环境 Specular 时，除直接灯光高光外的大量方向没有贡献。
+
+### Q23：Diffuse IBL 和 Specular IBL 使用的预计算资源有什么不同？
+
+Diffuse 查 Irradiance Map（通常方向为 N）；Specular 查 Roughness Prefiltered Cubemap（通常方向为 R）并使用 BRDF LUT。
+
+### Q24：为什么 Irradiance Cubemap 可以比原始 HDR Cubemap 小很多？
+
+Lambert Cosine Convolution 会平滑高频环境，生成的方向函数较低频，通常较少 Texel 即可表示。
+
+### Q25：Irradiance Map 中需要乘或除 π 吗？
+
+若存 `E=∫Li NoL dω`，Runtime Lambert 要乘 `albedo/π`；若已经存 `E/π`，Runtime 不能再除一次 π。
+
+### Q26：为什么 Specular IBL 不能只采样环境图在 R 方向上的一个 Texel？
+
+Roughness>0 时，反射分布覆盖一片方向区域，需要按 BRDF 相关分布对环境进行积分，而非只读取理想镜面方向的单点。
+
+### Q27：Split-Sum Approximation 把什么拆成了什么？
+
+把环境镜面积分近似为 `PrefilteredEnv(R,r)` 与 `F0*A(NoV,r)+B(NoV,r)` 的乘积。
+
+### Q28：Split-Sum 是数学恒等式吗？
+
+不是。积分分离、常见 `N=V` Prefilter 近似以及有限样本都引入误差，尤其在高粗糙度与强方向环境下更明显。
+
+### Q29：为什么 Prefilter Env 使用 R，而 Irradiance 使用 N？
+
+Diffuse 基于宏观法线对半球入射做平均；Specular 主要分布在宏观镜面反射方向 R 附近。
+
+### Q30：Prefilter Cubemap 的 Mip Level 为什么和 Roughness 绑定？
+
+不同 Roughness 需要不同宽度的环境卷积，常用各 Mip 存储其结果并用 Roughness 选择/插值。
+
+### Q31：IBL BRDF LUT 为什么只用 RG 两个通道？
+
+Schlick Fresnel 对 F0 可写成线性分解，分别积分得到 A、B，仅依赖 NoV 和 Roughness。
+
+### Q32：GGX Half Vector Sampling 的 PDF 如何得到？
+
+`pH=D NoH`，把采样 H 映射成 L 时使用反射 Jacobian：`pL=D NoH/(4 VoH)`。
+
+### Q33：为什么 PDF 中的 4 VoH 不能省？
+
+因为采样变量从 Half Vector 立体角转换到 Light Direction 立体角，其测度变化并非 1。漏掉会产生错误采样权重。
+
+### Q34：为什么 Prefilter Env Sampling 常使用 Hammersley？
+
+低差异序列比少量完全随机样本更均匀地覆盖积分域，常能改善有限样本的预积分噪声。
+
+### Q35：BRDF LUT 计算时使用 Direct G 一定正确吗？
+
+不一定。需要确认 LUT 使用的微面几何模型和 Runtime 预期一致；Direct 常采用不同 Schlick k 近似，不应未经核对混用。
+
+### Q36：为什么 Runtime 中 F0 A+B 需要和 Prefilter 相乘？
+
+LUT 近似材料/视角相关的 Fresnel/Geometry 权重，Prefilter 近似环境方向分布；两者共同给出 Specular IBL 近似结果。
+
+### Q37：为什么粗糙金属在高亮 HDR 环境下易出现噪点？
+
+环境有极窄高亮区域，预积分样本过少、错误 PDF 或源 Mip LOD 不匹配会导致高方差亮点。
+
+### Q38：为什么 IBL 反射方向 R 可以由 reflect(-V,N) 得到？
+
+`V` 从表面指向相机，进入表面的反向传播方向是 `-V`，它对 N 反射得到宏观镜面方向。
+
+### Q39：为什么 Prefilter Cube Face 可能出现接缝？
+
+Face 朝向、Seamless Cubemap Sampling、跨面预过滤、Mip 生成或采样方向约定不一致。
+
+### Q40：如何区分 PBR 高光错误是 BRDF、IBL 还是 Tone Mapping 的问题？
+
+分别输出 Direct Specular、Diffuse IBL、Prefilter Sample、LUT A/B、Linear HDR Color、ToneMapped Result。对固定镜面球做原始 HDR Cubemap/Prefilter 核对，再用 CPU Reference 比较公式。
+
+---
+
+## 二十三、动手验证与参考答案
+
+### 练习 1：手算常见非金属 F0
+
+从空气 `η1=1` 到介质 `η2=1.5`：
+
+$$
+F_0=
+\left(\frac{1-1.5}{1+1.5}\right)^2
+=0.04.
+$$
+
+检查 Schlick Fresnel 在 `VoH=1` 时为 `0.04`，在 `VoH=0` 时为 `1`。
+
+### 练习 2：检查 GGX Roughness 映射
+
+`r=0.5` 时：
+
+- `alpha=r²=0.25`。
+- `alpha²=0.0625`。
+
+`NoH=1` 时 NDF：
+
+$$
+D_{\mathrm{GGX}}(1)=
+\frac1{\pi\alpha^2}
+=\frac1{\pi(0.0625)}
+\approx5.09296.
+$$
+
+要验证自己的 Shader 是否把 `r²` 和 `alpha²` 混淆。
+
+### 练习 3：数值积分 GGX 的 NDF 归一化
+
+在局部 `N=(0,0,1)`，用均匀半球采样或确定性积分近似：
+
+$$
+\int_{\Omega^+}
+D(H)\,NoH\,\mathrm d\omega_h.
+$$
+
+对 `r=0.2、0.5、0.8` 进行验证，正确极限应接近 1。Roughness 很小时 NDF 很尖锐，需要更密集采样。
+
+### 练习 4：检查 Metallic 工作流
+
+给定 `baseColor=(0.8,0.2,0.1)`：
+
+1. `metallic=0`，观察 `F0=(0.04,0.04,0.04)`，有 Diffuse。
+2. `metallic=1`，观察 `F0=(0.8,0.2,0.1)`，基础 Diffuse 近似为零。
+3. `metallic=0.5`，计算中间 F0 并解释它代表的混合近似。
+
+### 练习 5：Constant Environment 下 Diffuse IBL
+
+给定 `baseColor=(0.6,0.5,0.2)`，整个入射半球 Radiance `Lenv=(2,2,2)`，对 `kD=1` 的理想 Lambert：
+
+$$
+E(N)=\pi L_{\mathrm{env}},
+\qquad
+L_o=C_{\mathrm{base}}L_{\mathrm{env}}.
+$$
+
+参考结果：`Lo=(1.2,1.0,0.4)`。若结果多了或少了 `π`，说明预计算/Shader 的 Irradiance 约定不一致。
+
+### 练习 6：验证 GGX PDF 变量变换
+
+随机选取有效 `V,H`，确保 `NoH>0`、`VoH>0`，构造 `L=reflect(-V,H)`。
+
+计算：
+
+- Half Vector PDF：`pH=D NoH`。
+- Direction PDF：`pL=pH/(4 VoH)`。
+
+通过数值积分/采样直方图比较是否遵守该 Jacobian；注意当反射到下半球时有效方向支持集需要明确处理。
+
+### 练习 7：BRDF LUT A/B 的边界实验
+
+生成至少 `64×64` 的两通道 LUT，并检查：
+
+- `NoV` 接近 1、Roughness 很低时，结果是否趋近合理的正面 Fresnel 响应。
+- `NoV` 较低、Roughness 变化时 A/B 是否连续。
+- LUT 是否出现 NaN、Inf、意外饱和或通道互换。
+- G 模型/分母是否与预计算约定匹配。
+
+然后用 `F0=0.04` 和有色 `F0` 测试 `F0*A+B`。
+
+### 练习 8：粗糙度金属球阵列
+
+制作金属球矩阵：
+
+- 横轴 `roughness=0.1..1.0`。
+- 纵轴 `metallic=0..1`。
+
+分别关闭 Direct Lighting、关闭 IBL、只开 Diffuse IBL、只开 Specular IBL，观察材质贡献来源。记录出现黑球、过亮和高光突然变化的条件。
+
+### 练习 9：分开验证 Prefilter Env 三个环节
+
+固定高动态范围室内 HDR 环境：
+
+1. 验证 Equirectangular → Cubemap 的方向。
+2. 查看 Prefilter Cubemap 的每个 Mip，确认随着 Roughness 增大反射逐渐模糊。
+3. 检查 `roughness*maxMip` 与预计算的 Roughness 定义一致。
+4. 比较是否有 Cubemap Face Seam、Fireflies 或 Mip Banding。
+
+### 练习 10：Direct 与 IBL 模型的一致性对照
+
+构建一个有已知环境和已知单个光源的测试场景：
+
+- Direct 使用相同 F0、Roughness、GGX D 和明确的 Geometry Approximation。
+- IBL 使用预滤波环境、LUT。
+- 比较低 Roughness 与高 Roughness、正面与掠射方向的结果。
+- 将差异区分为 BRDF 近似、Split-Sum 分离、预计算 Sample Count、曝光或颜色空间。
+
+**注意：** Split-Sum 是近似方法，因此不应期待其与逐方向精确积分在每个输入下完全相同。
+
+---
+
+## 二十四、公式速记
+
+| 核心知识 | 公式 / 结论 |
+|---|---|
+| Half Vector | `H=normalize(V+L)` |
+| Cook–Torrance | `fspec=DFG/(4 NoV NoL)` |
+| Dielectric F0 | `((eta1-eta2)/(eta1+eta2))²` |
+| Schlick Fresnel | `F=F0+(1-F0)(1-VoH)^5` |
+| GGX 参数映射 | `alpha=roughness²` |
+| GGX NDF | `D=alpha²/(pi*(NoH²*(alpha²-1)+1)²)` |
+| Exact GGX Smith G1 | `2 NoX/(NoX+sqrt(alpha²+(1-alpha²)NoX²))` |
+| Schlick-GGX G1 | `NoX/(NoX*(1-k)+k)` |
+| 常见 Direct k | `(roughness+1)²/8` |
+| Metallic F0 | `mix(0.04,baseColor,metallic)` |
+| 介质漫反射权重近似 | `kD=(1-F)*(1-metallic)` |
+| Disney Diffuse FD90 | `0.5+2*roughness*(LoH)²` |
+| Diffuse IBL | `albedo*E(N)/pi`（E 是未除 π 的 Irradiance） |
+| Specular 反射方向 | `R=reflect(-V,N)` |
+| GGX H PDF | `pH=D*NoH` |
+| GGX L PDF | `pL=D*NoH/(4*VoH)` |
+| Split-Sum | `Prefilter(R,r)*(F0*A(NoV,r)+B(NoV,r))` |
+| BRDF LUT Gvis | `G*VoH/(NoH*NoV)` |
+| A 系数 | `E[(1-Fc)*Gvis]` |
+| B 系数 | `E[Fc*Gvis]` |
+| Fc | `(1-VoH)^5` |
+| Typical Prefilter LOD | `roughness*maxMip`（需匹配生成约定） |
+| 预滤波样本立体角 | `1/(sampleCount*pL)` |
+| Constant Env Lambert | `Lo=albedo*Lenv` |
+
+---
+
+## 二十五、阅读完成后的自查清单
+
+- [ ] 能讲清 PBR 的物理约束、工作流与实时近似的区别。
+- [ ] 能从 Microfacet Model 解释 Half Vector、NDF、Masking-Shadowing。
+- [ ] 能完整写出 Cook–Torrance DFG BRDF。
+- [ ] 能解释 Fresnel 为什么使用 VoH、介质 F0 为什么常为 0.04。
+- [ ] 能写出 Schlick Fresnel，并说明金属 F0 带颜色。
+- [ ] 能记住 `alpha=r²` 与 GGX 中 `alpha²=r⁴` 的区别。
+- [ ] 能解释 GGX 长尾、Roughness 与高光宽度的关系。
+- [ ] 能比较准确 GGX Smith G1 与 Schlick–GGX Geometry 近似。
+- [ ] 能说明微面 G 与场景 Shadow Visibility 的不同。
+- [ ] 能解释 Metallic–Roughness 中 Base Color、F0 和 Diffuse 的关系。
+- [ ] 能使用 GLSL 实现 Direct GGX Specular 与 Diffuse。
+- [ ] 能说明 Disney Diffuse、Clear Coat、Sheen 与基本 Cook–Torrance 的差异。
+- [ ] 能从渲染方程写出 Diffuse IBL 与 Specular IBL 的不同积分。
+- [ ] 能推导 `Diffuse=albedo*E(N)/π`，并验证 Constant Environment。
+- [ ] 能解释 Irradiance Map 存 `E` 与 `E/π` 两种约定。
+- [ ] 能解释为什么 Specular IBL 使用 R 与 Roughness Mip。
+- [ ] 能清楚说明 Split-Sum 不是精确数学恒等式。
+- [ ] 能把 Schlick Fresnel 分解为 `F0(1-Fc)+Fc`。
+- [ ] 能说明 BRDF LUT A/B 为何只依赖 NoV、Roughness。
+- [ ] 能从 `pH=D NoH` 推导 `pL=D NoH/(4 VoH)`。
+- [ ] 能写出 GGX Importance Sampling 与 Hammersley。
+- [ ] 能解释 Prefilter Env 为什么使用 `N=V=R` 的近似。
+- [ ] 能说明 Prefilter Cubemap 的 Mip 与 Roughness 映射必须一致。
+- [ ] 能检查 BRDF LUT 的预计算 G 与 Runtime 模型是否匹配。
+- [ ] 能完整组织 Environment Cubemap、Irradiance、Prefilter、LUT 的数据流。
+- [ ] 能解释高 Roughness 的多次散射能量问题。
+- [ ] 能识别 Normal Map、sRGB、HDR、AO 与 Specular Occlusion 中的错误。
+- [ ] 能用 RenderDoc 逐项调试 Direct/Indirect Specular、LUT 与环境纹理。
+- [ ] 能在 OpenGLRenderer 中完成金属球阵列和 GGX NDF/PDF 的数值测试。
+
+**关联前一篇：** [05-光照模型与渲染方程](05-光照模型与渲染方程.md)。
+
+**关联下一篇：** 07-阴影技术（待编写）—— Shadow Mapping、Shadow Acne、Bias、PCF/PCSS、CSM、VSM、EVSM、接触阴影与 Ray Traced Shadow。
