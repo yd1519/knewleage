@@ -85,7 +85,7 @@ BRDF、光线叠加、透射与曝光近似按照线性物理量组合。如果�
 
 若线性通道 `L∈[0,1]`，sRGB 编码为：
 
-$$
+```math
 \boxed{
 S(L)=
 \begin{cases}
@@ -93,11 +93,11 @@ S(L)=
 1.055L^{1/2.4}-0.055, & L>0.0031308.
 \end{cases}
 }
-$$
+```
 
 反向 sRGB Decode：
 
-$$
+```math
 \boxed{
 L(S)=
 \begin{cases}
@@ -105,7 +105,7 @@ S/12.92, & S\le0.04045,\\
 \left(\frac{S+0.055}{1.055}\right)^{2.4}, & S>0.04045.
 \end{cases}
 }
-$$
+```
 
 Gamma 2.2 是常见口语近似，不能完全替代标准 Piecewise sRGB 转换。上述函数定义的是单位化 SDR 颜色通道编码，不是 HDR10 PQ。
 
@@ -148,11 +148,11 @@ BaseColor 通常存美术创作的 sRGB 编码颜色，参与 PBR 运算前需�
 
 不等于。对**线性 sRGB/Rec.709 RGB**，常见相对亮度计算：
 
-$$
+```math
 \boxed{
 Y=0.2126R+0.7152G+0.0722B.
 }
-$$
+```
 
 其中绿色系数较大反映对应色域/视觉加权下的贡献。该式不是对任意 Wide Gamut RGB 通用的矩阵行，也不是 CIE 光谱积分的直接替代。
 
@@ -168,11 +168,11 @@ $$
 
 对正亮度 `Y>0`：
 
-$$
+```math
 \boxed{
 \ell=\log_2 Y.
 }
-$$
+```
 
 取 Log 可把若干数量级的亮度范围转换成更适合统计和分桶的数值空间，还可避免少量极端亮点完全主导简单算术平均。
 
@@ -182,11 +182,11 @@ Scene Color 中可能有真正的黑色背景或未覆盖像素；数学上 `log
 
 常见方案：
 
-$$
+```math
 \boxed{
 \ell=\log_2(\max(Y,\varepsilon)).
 }
-$$
+```
 
 `epsilon` 是工程保护阈值。阈值选取会影响极暗区域是否被计入曝光统计；它不是无关紧要的数字。
 
@@ -194,21 +194,21 @@ $$
 
 对 `N` 个正亮度值 `Y_i`：
 
-$$
+```math
 \frac1N\sum_{i=1}^{N}\log_2 Y_i
 =\log_2\left(
 \prod_{i=1}^{N}Y_i
 \right)^{1/N}.
-$$
+```
 
 因此：
 
-$$
+```math
 \boxed{
 Y_{\mathrm{geo}}=
 2^{\frac1N\sum_i \log_2 Y_i}.
 }
-$$
+```
 
 这是**几何平均**，不是算术平均 `(1/N)sum(Y_i)`。在 HDR 场景中两者可能相差很大。
 
@@ -226,11 +226,11 @@ $$
 
 曝光把场景线性颜色统一乘一个比例，决定某个 Scene Luminance 经过 Tone Mapping 前落到什么亮度范围：
 
-$$
+```math
 \boxed{
 C_{\mathrm{exposed}}=E\,C_{\mathrm{scene}}.
 }
-$$
+```
 
 简单曝光不是改变 PBR BRDF 或灯光真实能量，而是改变**虚拟相机如何把场景量映射到成像信号**。
 
@@ -238,12 +238,12 @@ $$
 
 本篇把曝光补偿 `EC` 定义为加亮的 Stops，因此：
 
-$$
+```math
 \boxed{
 E_{\mathrm{adjusted}}=
 E_{\mathrm{base}}\,2^{EC}.
 }
-$$
+```
 
 - `EC=+1`：曝光乘 2，画面通常更亮。
 - `EC=-1`：曝光乘 0.5，画面通常更暗。
@@ -255,14 +255,14 @@ Tone Mapping 之后视觉明暗变化可能是非线性的，因此“曝光乘 
 
 EV100 是在 ISO 100 标准化的曝光值表达。对给定光圈 f-number `N`、快门时间 `t`（秒）与 ISO：
 
-$$
+```math
 \boxed{
 EV_{100}=
 \log_2\left(
 \frac{N^2}{t}\,\frac{100}{ISO}
 \right).
 }
-$$
+```
 
 它描述相机曝光参数之间的关系；**EV100 越大通常意味着在同等场景亮度下曝光越少**。它与上段“正曝光补偿提高 E”的符号含义不同。
 
@@ -296,14 +296,14 @@ Auto Exposure 根据当前场景亮度统计决定目标曝光，让画面在变
 
 假设 `Y_{\mathrm{meter}}` 是经过合理测光的线性相对亮度，`K_{\mathrm{key}}>0` 是希望映射到 Tone Mapping 前的参考灰度/Key（例如教学常用的 0.18），则：
 
-$$
+```math
 \boxed{
 E_{\mathrm{target}}=
 \frac{K_{\mathrm{key}}}{
 \max(Y_{\mathrm{meter}},\varepsilon)
 }.
 }
-$$
+```
 
 对该简化模型，`Y_meter` 翻两倍时目标曝光减半。真实引擎可能使用另一个曝光校准、物理相机参数或 Tone Mapping 的中灰定位。
 
@@ -332,7 +332,7 @@ $$
 
 对各样本亮度 `Y_i`、对应非负权重 `w_i`：
 
-$$
+```math
 \boxed{
 \overline{\ell}_w=
 \frac{\sum_i w_i\,\log_2(\max(Y_i,\varepsilon))}
@@ -340,7 +340,7 @@ $$
 \qquad
 Y_{\mathrm{meter}}=2^{\overline{\ell}_w}.
 }
-$$
+```
 
 要求总权重为正。权重可以来自图像中心距离、Mask Texture 或其它画面主体识别逻辑。
 
@@ -366,11 +366,11 @@ GPU Compute 可在 GPU 上做部分统计，并将少量 Bucket/Exposure 数据�
 
 预先设定 Log2 Luminance 范围 `[ell_min,ell_max]`，有 `B` 个 Bucket。对有效的亮度 `Y>0`：
 
-$$
+```math
 \ell=\log_2(\max(Y,\varepsilon)).
-$$
+```
 
-$$
+```math
 \boxed{
 b=\mathrm{clamp}\left(
 \left\lfloor
@@ -378,7 +378,7 @@ B\frac{\ell-\ell_{\min}}{\ell_{\max}-\ell_{\min}}
 \right\rfloor,\ 0,\ B-1
 \right).
 }
-$$
+```
 
 这相当于按**等宽 Log2 Luminance 档位**统计。真实实现可能将 0 号 Bin 专门保留给纯黑/无效 Sample；这种策略要与 Reduction Pass 保持一致。
 
@@ -425,11 +425,11 @@ Target Exposure -> Temporal Adaptation
 
 若以 Histogram Bin 代表的 Log-Luminance 中点 `ell_b` 加权，所得的是近似平均 **Log-Luminance**：
 
-$$
+```math
 \overline{\ell}\approx
 \frac{\sum_b h_b\,\ell_b}
 {\sum_b h_b}.
-$$
+```
 
 最后 `Y_meter=2^{meanLog}`。分桶过程已经丢失每个 Bin 内的精确亮度，结果是数值近似而非与逐像素全精度 Log Mean 完全相等。
 
@@ -559,13 +559,13 @@ glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
 对统计 `h_b` 和每 Bin 代表的 Log2 中心值 `ell_b`：
 
-$$
+```math
 \ell_b=\ell_{\min}
 +\left(b+\frac12\right)
 \frac{\ell_{\max}-\ell_{\min}}{B}.
-$$
+```
 
-$$
+```math
 \boxed{
 Y_{\mathrm{meter}}\approx
 2^{
@@ -573,7 +573,7 @@ Y_{\mathrm{meter}}\approx
 {\sum_b h_b}
 }.
 }
-$$
+```
 
 这是依据桶中点近似的 Log-Mean。边界 Clamping 会让超出统计范围的亮度失真。
 
@@ -683,13 +683,13 @@ float MeterLogLuminanceFromHistogram(
 
 设当前曝光 `E_t`、目标 `E_target`、本帧时间步长 `Delta t`、适应速率 `s>0`：
 
-$$
+```math
 \boxed{
 a=1-e^{-s\Delta t},
 \qquad
 E_{t+1}=E_t+a(E_{\mathrm{target}}-E_t).
 }
-$$
+```
 
 `a` 随 Frame Delta Time 调整；在目标不变且采样足够细时，能获得比固定每帧插值系数更一致的时间响应。
 
@@ -697,21 +697,21 @@ $$
 
 曝光以倍数改变，常希望“每秒变化多少 Stops”更可控。设：
 
-$$
+```math
 e_t=\log_2(E_t),\qquad
 e_{\mathrm{target}}=\log_2(E_{\mathrm{target}}).
-$$
+```
 
 在 Log2 Space 平滑：
 
-$$
+```math
 \boxed{
 e_{t+1}=e_t+
 (1-e^{-s\Delta t})(e_{\mathrm{target}}-e_t),
 \qquad
 E_{t+1}=2^{e_{t+1}}.
 }
-$$
+```
 
 相比在线性 Exposure 值上插值，该方法对从 0.1→1 和 1→10 这类相同 Stops 跨度的变化更一致。
 
@@ -728,17 +728,17 @@ $$
 
 固定速率 `s=2/s`，`Delta t=0.5s`：
 
-$$
+```math
 a=1-e^{-1}\approx0.63212.
-$$
+```
 
 线性空间从 `E=1` 朝 `E_target=4` 更新一帧：
 
-$$
+```math
 E_{\mathrm{next}}
 =1+0.63212(4-1)
 \approx2.89636.
-$$
+```
 
 若使用 Log2 Space 插值，结果不一样；**比较数学结果时务必先确认平滑的是 Exposure 还是 Log Exposure**。
 
@@ -815,20 +815,20 @@ Pre-Exposure 不是让低精度格式 magically 具备无限动态范围；其�
 
 教学上先设场景线性颜色 `C_scene`，Pre-Exposure 缩放 `P_t>0`：
 
-$$
+```math
 \boxed{
 C_t^{\mathrm{stored}}=P_t C_t^{\mathrm{scene}}.
 }
-$$
+```
 
 假设最终想使用相机曝光 `E_t`：
 
-$$
+```math
 \boxed{
 C_t^{\mathrm{exposed}}=
 \frac{E_t}{P_t}C_t^{\mathrm{stored}}.
 }
-$$
+```
 
 这两个式子自洽，表达了“Buffer 中存储值”与“最终曝光意义”之间的尺度转换。具体引擎可能把 `P` 定义为曝光倒数或采用其它方式，必须以真实约定为准。
 
@@ -836,21 +836,21 @@ $$
 
 假设本篇保存的上一帧 History 为：
 
-$$
+```math
 H_{t-1}^{\mathrm{stored}}
 =P_{t-1}C_{t-1}^{\mathrm{scene}}.
-$$
+```
 
 现在要在当前帧 `P_t` 的存储尺度下混合历史，就必须：
 
-$$
+```math
 \boxed{
 H_{t-1}^{\mathrm{currentScale}}
 =
 H_{t-1}^{\mathrm{stored}}
 \frac{P_t}{P_{t-1}}.
 }
-$$
+```
 
 如果忽略这个比例，曝光或 Pre-Exposure 快速变化时，即使画面光照不变，TAA History 也可能突然变亮/变暗、拖尾或闪烁。
 
@@ -893,11 +893,11 @@ Tone Mapping 将场景或曝光后的高范围信号通过非线性映射放入�
 
 对非负线性曝光颜色 `x≥0`：
 
-$$
+```math
 \boxed{
 T_{\mathrm{Reinhard}}(x)=\frac{x}{1+x}.
 }
-$$
+```
 
 当 `x=0` 时输出 0；`x→∞` 时趋近 1。可以逐 RGB 通道使用，也可以围绕 Luminance 构建不同变体。
 
@@ -911,10 +911,10 @@ $$
 
 不是：
 
-$$
+```math
 T(1)=\frac12=0.5,\qquad
 T(2)=\frac23\approx0.6667.
-$$
+```
 
 曝光从 1 倍到 2 倍，输入翻倍，Tone-Mapped 结果从 0.5 到约 0.6667，而不是 1.0。
 
@@ -930,12 +930,12 @@ $$
 
 一种常见的白点参数化曲线：
 
-$$
+```math
 \boxed{
 T(x)=
 \frac{x\left(1+\frac{x}{W^2}\right)}{1+x}.
 }
-$$
+```
 
 其中 `W>0` 是选定 White Point，`T(W)=1`。**该函数对 `x>W` 可能输出大于 1**，最终仍需按照目标显示编码处理；不要错误宣称它对任意非负输入自动被界定在 [0,1]。
 
@@ -953,13 +953,13 @@ ACES（Academy Color Encoding System）是一套涉及场景颜色编码、色�
 
 一类被广泛引用的标量拟合：
 
-$$
+```math
 \boxed{
 T_{\mathrm{fit}}(x)=
 \frac{x(2.51x+0.03)}
 {x(2.43x+0.59)+0.14}.
 }
-$$
+```
 
 典型 Shader 对 RGB 通道分别计算后 Clamp 到 [0,1]。它以 ACES 风格的高光压缩为目标，但**不是完整 ACES RRT/ODT**；颜色原色空间、矩阵处理、色相行为和输出映射都有更复杂的细节。
 
@@ -1048,7 +1048,7 @@ Exposure / Tone Mapping / Output Encoding
 
 最简单的方法在亮度超过阈值 `T` 时保留高亮部分：
 
-$$
+```math
 \boxed{
 B(C)=
 \begin{cases}
@@ -1056,7 +1056,7 @@ B(C)=
 C,&Y(C)>T.
 \end{cases}
 }
-$$
+```
 
 但是硬阈值在 `Y≈T` 附近不连续，镜头移动、TAA Jitter 或光源变化时可能导致 Bloom 闪烁。
 
@@ -1066,11 +1066,11 @@ Soft Knee 在阈值附近设计一段平滑过渡，使 Bright Pass 响应连续
 
 例如教学用的 Soft Weight：
 
-$$
+```math
 w(Y)=
 \mathrm{smoothstep}(T-k,\ T+k,\ Y),
 \quad k>0,
-$$
+```
 
 再令 `B(C)=w(Y(C))*C`。这是简单平滑权重，并非某个商业引擎 Bloom Prefilter 的唯一标准算法。
 
@@ -1150,21 +1150,21 @@ Downsample 若只随机读取一个像素，可能跳过极亮的子像素高光
 
 若 `B_i` 是各层低分辨率 Bloom，经过 Upsample/Filter 回到同一空间和尺寸后可加权求和：
 
-$$
+```math
 \boxed{
 B_{\mathrm{full}}=
 \sum_i w_i\,\mathrm{Upsample}(B_i).
 }
-$$
+```
 
 最终一种常见合成：
 
-$$
+```math
 \boxed{
 C_{\mathrm{combined}}=
 C_{\mathrm{scene}}+s_B B_{\mathrm{full}}.
 }
-$$
+```
 
 其中 `s_B` 是艺术强度参数；`w_i` 和各 Mip 的过滤核会影响光晕半径与能量，需要避免所有 Mip 不加归一化地随意叠加导致强度依 Mip Count 改变。
 
@@ -1227,12 +1227,12 @@ Color Grading 用于统一画面风格和色彩观感，可包含：
 
 3D LUT 以三个颜色通道作为三维索引，将输入颜色映射到输出颜色：
 
-$$
+```math
 \boxed{
 C_{\mathrm{out}}=
 LUT_{3D}(C_{\mathrm{in}}).
 }
-$$
+```
 
 `Cin` 所属色域、Transfer、数值区间必须和 LUT 的作者/生成软件使用的 Domain 一致。
 
@@ -1292,12 +1292,12 @@ White Balance 调整不同光源色温/色偏下中性色的呈现方式，通�
 
 对于线性 `C`、亮度 `Y=dot(C,w)`，定义 `s`：
 
-$$
+```math
 \boxed{
 C_{\mathrm{sat}}=
 Y\mathbf 1+s(C-Y\mathbf1).
 }
-$$
+```
 
 `s=0` 得到灰度；`s=1` 不变。该式是简单色彩插值，不是完全符合人眼感知或专业 Grading 系统的饱和度模型。
 
@@ -1390,15 +1390,15 @@ HDR 场景中的亮度数值可能远大于 SDR UI 的 1.0 参考范围。如果
 
 很多运算不满足交换律。曝光与 Tone Mapping：
 
-$$
+```math
 T(E C)\ne E T(C).
-$$
+```
 
 HDR Bloom 和 Tone Mapping：
 
-$$
+```math
 T(C+B)\ne T(C)+T(B).
-$$
+```
 
 Color Grading 变换可能依赖输入的颜色空间与亮度范围，TAA 依赖 History 和一致的 Pre-Exposure，UI 需要独立的显示范围，因此 Pass 顺序与数据语义同样重要。
 
@@ -1613,19 +1613,19 @@ vec3 exposed = storedScene * (exposure / preExposure);
 
 令屏幕 UV `u,v∈[0,1]`，以屏幕中心 `c=(0.5,0.5)` 为参考：
 
-$$
+```math
 r^2=(u-0.5)^2+(v-0.5)^2.
-$$
+```
 
 可采用高斯式权重：
 
-$$
+```math
 \boxed{
 w(u,v)=
 w_{\min}+
 (1-w_{\min})\exp\left(-\frac{r^2}{2\sigma^2}\right).
 }
-$$
+```
 
 其中 `sigma` 控制 Metering Region 的宽度，`w_min` 防止边缘完全失去权重。此公式忽略画面非方形 Aspect Correction；真实项目可对 UV 距离进行宽高比校正，或在 Pixel Space 计算。
 
@@ -1756,19 +1756,19 @@ Lens Dirt 将 Bloom/高亮分布与镜头污渍纹理组合，产生可见的眩
 
 ### 3. 1080p 的一张 RGBA16F 约占多少空间？
 
-$$
+```math
 1920\cdot1080\cdot8
 =16\,588\,800\ \mathrm{bytes}.
-$$
+```
 
 折算为二进制 MiB：
 
-$$
+```math
 \boxed{
 \frac{16\,588\,800}{1024^2}
 \approx15.82\ \mathrm{MiB}.
 }
-$$
+```
 
 这是**单张无多样本、无 Mip、无额外分配开销**的名义大小。两张 TAA History、Bloom Mips、HDR Ping-Pong 等会另外占空间。
 
@@ -2069,10 +2069,10 @@ TAA 重用历史并要求曝光尺度一致；Bloom 依赖高亮范围；Exposur
 
 由于 `0.18>0.0031308`：
 
-$$
+```math
 S(0.18)=1.055(0.18)^{1/2.4}-0.055
 \approx0.46136.
-$$
+```
 
 这说明 Linear Middle Gray 0.18 **不是** sRGB 编码值 0.18。用 CPU 和 GLSL 同时验证。
 
@@ -2080,17 +2080,17 @@ $$
 
 `C=(2.0,1.0,0.5)`，假设线性 Rec.709 原色空间：
 
-$$
+```math
 Y=0.2126\cdot2.0+
 0.7152\cdot1.0+
 0.0722\cdot0.5.
-$$
+```
 
 参考结果：
 
-$$
+```math
 \boxed{Y=1.1765.}
-$$
+```
 
 其结果大于 1 并不违反什么限制，因为 Scene RGB 本来就是 HDR。
 
@@ -2101,9 +2101,9 @@ $$
 - 算术平均：`(1+16)/2=8.5`。
 - 几何平均：
 
-$$
+```math
 Y_{\mathrm{geo}}=\sqrt{1\cdot16}=4.
-$$
+```
 
 使用 `log2` 均值再反变换，检查结果也应为 4。
 
@@ -2121,20 +2121,20 @@ $$
 
 Metered Luminance 为 `Y=0.36`，Reference Key 为 `K=0.18`：
 
-$$
+```math
 E_{\mathrm{target}}=
 \frac{0.18}{0.36}=0.5.
-$$
+```
 
 若测光亮度减半变成 `0.18`，新目标曝光回到 `1.0`。
 
 ### 练习 6：Reinhard Tone Mapping 的两个输入
 
-$$
+```math
 T(1)=\frac{1}{2}=0.5,
 \qquad
 T(4)=\frac45=0.8.
-$$
+```
 
 解释为何线性曝光倍增和 Tone-Mapped Output 不呈线性倍增。
 
@@ -2142,13 +2142,13 @@ $$
 
 已知 `E_current=1`、`E_target=4`、`s=2/s`、`dt=0.5s`，在线性 Exposure 空间：
 
-$$
+```math
 a=1-e^{-1}\approx0.6321206.
-$$
+```
 
-$$
+```math
 E_{\mathrm{new}}=1+a(4-1)\approx2.89636.
-$$
+```
 
 再使用第九节的 C++ 代码在 Log2 Exposure Space 测试，比较两个算法的输出，说明它们不相等且都可以构成合理的时间适应方案。
 
@@ -2158,11 +2158,11 @@ $$
 
 先转换 History 到当前 Pre-Exposure：
 
-$$
+```math
 H_{\mathrm{currentScale}}=
 (4,2,1)\frac{0.5}{2}
 =\boxed{(1,0.5,0.25)}.
-$$
+```
 
 如果不转换便将其与当前 Color 混合，数值将相差 4 倍。
 
@@ -2172,14 +2172,14 @@ $$
 
 对 `Y=1`：
 
-$$
+```math
 \ell=\log_2(1)=0,
 \quad
 b=\left\lfloor
 256\frac{0-(-8)}{8-(-8)}
 \right\rfloor
 =128.
-$$
+```
 
 在 GLSL 与 CPU Reference 中检查 Bucket 128 是否得到该样本。若输入为 `Y=2`，结果应落入 Bucket 144。
 
@@ -2187,15 +2187,15 @@ $$
 
 两个样本 `Y_1=1`、`Y_2=16`，权重 `w_1=3`、`w_2=1`：
 
-$$
+```math
 \overline{\ell}=
 \frac{3\log_2(1)+\log_2(16)}{4}
 =\frac{4}{4}=1.
-$$
+```
 
-$$
+```math
 Y_{\mathrm{weighted}}=2^1=2.
-$$
+```
 
 它与等权几何平均 4 明显不同，说明 Metering Mask 需要进入统计过程。
 
@@ -2213,15 +2213,15 @@ $$
 
 一张 `1920×1080` 的单样本 RGBA16F 名义字节数：
 
-$$
+```math
 1920\cdot1080\cdot8=16\,588\,800\ \mathrm{bytes}.
-$$
+```
 
 换算：
 
-$$
+```math
 \frac{16\,588\,800}{1024^2}\approx15.82\ \mathrm{MiB}.
-$$
+```
 
 再计算同分辨率双 History Buffer 约 `31.64 MiB`，不包含压缩、额外 Mips 和分配开销。
 
